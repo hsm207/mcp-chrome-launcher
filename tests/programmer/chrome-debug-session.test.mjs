@@ -1,5 +1,4 @@
-import test, { describe } from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, expect, onTestFinished, test } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import http from 'node:http';
 import net from 'node:net';
@@ -31,35 +30,40 @@ function startRealDevToolsServer() {
 describe('chrome-debug-session', () => {
   test('Given port and userDataDir, when buildChromeSpawnSpec runs, then it configures detached Chrome', () => {
     const spec = buildChromeSpawnSpec({ port: 9222, userDataDir: 'C:\\temp\\chrome-dev-profile-test' });
-    assert.deepEqual(spec.args, ['--remote-debugging-port=9222', '--user-data-dir=C:\\temp\\chrome-dev-profile-test']);
-    assert.equal(spec.options.detached, true);
-    assert.equal(spec.options.stdio, 'ignore');
+    expect(spec.args).toEqual(['--remote-debugging-port=9222', '--user-data-dir=C:\\temp\\chrome-dev-profile-test']);
+    expect(spec.options.detached).toBe(true);
+    expect(spec.options.stdio).toBe('ignore');
   });
 
-  test('Given a real DevTools HTTP server, when waitForPort runs, then it resolves', async (t) => {
+  test('Given a real DevTools HTTP server, when waitForPort runs, then it resolves', async () => {
     const srv = await startRealDevToolsServer();
-    t.after(() => srv.close());
-    await waitForPort({ port: srv.port, timeoutMs: 2000, intervalMs: 50 });
+    onTestFinished(() => srv.close());
+    await expect(waitForPort({ port: srv.port, timeoutMs: 2000, intervalMs: 50 })).resolves.toBeUndefined();
   });
 
   test('Given an unused port, when waitForPort runs, then it rejects with timeout and port', async () => {
-    await assert.rejects(() => waitForPort({ port: 19999, timeoutMs: 150, intervalMs: 50 }), /150ms.*19999/);
+    await expect(waitForPort({ port: 19999, timeoutMs: 150, intervalMs: 50 })).rejects.toThrow(/150ms.*19999/);
   });
 
-  test('Given a real TCP listener on port, when diagnoseStartupFailure runs, then it reports port conflict', async (t) => {
+  test('Given a real TCP listener on port, when diagnoseStartupFailure runs, then it reports port conflict', async () => {
     const server = net.createServer();
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
-    t.after(() => new Promise((r) => server.close(r)));
+    onTestFinished(() => new Promise((r) => server.close(r)));
     const { port } = server.address();
     const msg = await diagnoseStartupFailure({ port, userDataDir: os.tmpdir() });
-    assert.match(msg, new RegExp(`Port ${port} is already in use`, 'i'));
+    expect(msg).toMatch(new RegExp(`Port ${port} is already in use`, 'i'));
   });
 
-  test('Given a real profile lockfile, when diagnoseStartupFailure runs, then it reports profile lock', async (t) => {
+  test('Given a real profile lockfile, when diagnoseStartupFailure runs, then it reports profile lock', async () => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-lock-test-'));
-    t.after(() => rmSync(dir, { recursive: true, force: true }));
+    onTestFinished(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(path.join(dir, 'lockfile'), '');
     const msg = await diagnoseStartupFailure({ port: 19998, userDataDir: dir });
-    assert.match(msg, /locked.*--remote-debugging-port=19998/i);
+    expect(msg).toMatch(/locked.*--remote-debugging-port=19998/i);
+  });
+
+  test('Given unused port and unlocked profile, when diagnoseStartupFailure runs, then it reports generic failure', async () => {
+    const msg = await diagnoseStartupFailure({ port: 19997, userDataDir: os.tmpdir() });
+    expect(msg).toMatch(/Chrome failed to expose DevTools on port 19997/i);
   });
 });

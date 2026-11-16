@@ -1,5 +1,4 @@
-import test, { describe } from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, expect, onTestFinished, test } from 'vitest';
 import { spawn } from 'node:child_process';
 import http from 'node:http';
 import {
@@ -30,62 +29,68 @@ function startRealDevToolsServer() {
 describe('mcp-stdio-bridge', () => {
   test('Given no args, when buildMcpSpawnSpec runs, then it defaults to npx chrome-devtools-mcp@latest', () => {
     const spec = buildMcpSpawnSpec([]);
-    assert.equal(spec.command, 'npx');
-    assert.deepEqual(spec.args, ['-y', 'chrome-devtools-mcp@latest']);
-    assert.equal(spec.options.stdio, 'inherit');
-    assert.equal(spec.options.shell, process.platform === 'win32');
+    expect(spec.command).toBe('npx');
+    expect(spec.args).toEqual(['-y', 'chrome-devtools-mcp@latest']);
+    expect(spec.options.stdio).toBe('inherit');
+    expect(spec.options.shell).toBe(process.platform === 'win32');
   });
 
   test('Given caller args, when buildMcpSpawnSpec runs, then it forwards them after package name', () => {
     const spec = buildMcpSpawnSpec(['--allowUnrestrictedPaths', '--categoryExtensions']);
-    assert.deepEqual(spec.args, ['-y', 'chrome-devtools-mcp@latest', '--allowUnrestrictedPaths', '--categoryExtensions']);
+    expect(spec.args).toEqual(['-y', 'chrome-devtools-mcp@latest', '--allowUnrestrictedPaths', '--categoryExtensions']);
   });
 
   test('Given browserUrl, when buildMcpSpawnSpec runs, then it includes --browserUrl', () => {
     const spec = buildMcpSpawnSpec(['--allowUnrestrictedPaths'], { browserUrl: 'http://127.0.0.1:9222' });
-    assert.deepEqual(spec.args, ['-y', 'chrome-devtools-mcp@latest', '--browserUrl=http://127.0.0.1:9222', '--allowUnrestrictedPaths']);
+    expect(spec.args).toEqual(['-y', 'chrome-devtools-mcp@latest', '--browserUrl=http://127.0.0.1:9222', '--allowUnrestrictedPaths']);
   });
 
   test('Given child exits 0, when runPassthrough runs, then it resolves with 0', async () => {
     const code = await runPassthrough([], () => ({ command: process.execPath, args: ['-e', 'process.exit(0)'], options: { stdio: 'inherit' } }));
-    assert.equal(code, 0);
+    expect(code).toBe(0);
   });
 
   test('Given child exits 42, when runPassthrough runs, then it forwards exit code 42', async () => {
     const code = await runPassthrough([], () => ({ command: process.execPath, args: ['-e', 'process.exit(42)'], options: { stdio: 'inherit' } }));
-    assert.equal(code, 42);
+    expect(code).toBe(42);
   });
 
-  test('Given a real DevTools server on port, when launchAndRun runs, then it passes browserUrl to runMcp', async (t) => {
+  test('Given non-existent command, when runPassthrough runs, then it rejects with spawn error', async () => {
+    await expect(
+      runPassthrough([], () => ({ command: 'nonexistent-cmd-xyz-12345', args: [], options: { stdio: 'ignore' } }))
+    ).rejects.toThrow(/ENOENT/);
+  });
+
+  test('Given a real DevTools server on port, when launchAndRun runs, then it passes browserUrl to runMcp', async () => {
     const srv = await startRealDevToolsServer();
-    t.after(() => srv.close());
+    onTestFinished(() => srv.close());
     const code = await launchAndRun(['--allowUnrestrictedPaths'], {
       port: srv.port,
       runMcp: async (args, opts) => {
-        assert.deepEqual(args, ['--allowUnrestrictedPaths']);
-        assert.deepEqual(opts, { browserUrl: `http://127.0.0.1:${srv.port}` });
+        expect(args).toEqual(['--allowUnrestrictedPaths']);
+        expect(opts).toEqual({ browserUrl: `http://127.0.0.1:${srv.port}` });
         return 0;
       },
     });
-    assert.equal(code, 0);
+    expect(code).toBe(0);
   });
 
   test('Given a real child process, when wireLifecycle detaches, then listener count returns to baseline', () => {
     const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)']);
     const before = process.listenerCount('SIGTERM');
     const detach = wireLifecycle(child);
-    assert.equal(process.listenerCount('SIGTERM'), before + 1);
+    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
     detach();
-    assert.equal(process.listenerCount('SIGTERM'), before);
+    expect(process.listenerCount('SIGTERM')).toBe(before);
     child.kill();
   });
 
   test('Given tools/call JSON-RPC chunk, when isToolCallMessage runs, then it returns true', () => {
-    assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}\n'), true);
+    expect(isToolCallMessage('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}\n')).toBe(true);
   });
 
   test('Given initialize or tools/list chunk, when isToolCallMessage runs, then it returns false', () => {
-    assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'), false);
-    assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'), false);
+    expect(isToolCallMessage('{"jsonrpc":"2.0","id":1,"method":"initialize"}\n')).toBe(false);
+    expect(isToolCallMessage('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n')).toBe(false);
   });
 });

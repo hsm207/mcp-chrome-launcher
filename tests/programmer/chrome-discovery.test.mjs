@@ -1,11 +1,9 @@
-import test, { describe } from 'node:test';
-import assert from 'node:assert/strict';
+import { describe, expect, test } from 'vitest';
 import { findChromePath } from '../../mcp-chrome-launcher.mjs';
 
 describe('chrome-discovery', () => {
   test('Given no Chrome binary on disk, when findChromePath runs, then it throws an agent-friendly error', () => {
-    assert.throws(
-      () => findChromePath({ platform: 'linux', env: {}, existsSync: () => false }),
+    expect(() => findChromePath({ platform: 'linux', env: {}, existsSync: () => false })).toThrow(
       /Chrome executable not found.*--chromePath=<path>/s
     );
   });
