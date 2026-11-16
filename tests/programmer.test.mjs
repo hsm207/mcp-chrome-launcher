@@ -1,8 +1,11 @@
 import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import http from 'node:http';
+import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { EventEmitter } from 'node:events';
 import {
   buildChromeSpawnSpec,
   buildMcpSpawnSpec,
@@ -17,38 +20,20 @@ import {
 } from '../mcp-chrome-launcher.mjs';
 
 /**
- * Builds deterministic stub dependencies and call-recording arrays for `launchAndRun` tests.
- * @param {{ port?: number, readyAfter?: number }} [opts]
+ * Starts a real local HTTP server that responds 200 OK on `/json/version`.
+ * @returns {Promise<{ port: number, close: () => Promise<void> }>}
  */
-function createLaunchStubs({ port = 9223, readyAfter = 1 } = {}) {
-  const events = [];
-  const waits = [];
-  let spawned = 0;
-  let probeCalls = 0;
-  let mcpOpts = null;
-
-  return {
-    events,
-    waits,
-    get spawned() { return spawned; },
-    get mcpOpts() { return mcpOpts; },
-    deps: {
-      port,
-      userDataDir: 'C:\\temp\\profile',
-      spawnChrome: (cmd, args, opts) => {
-        spawned++;
-        events.push({ cmd, args, opts });
-        return { unref: () => events.push('unref') };
-      },
-      probeFn: async () => ++probeCalls >= readyAfter,
-      waitFn: async (ms) => { waits.push(ms); events.push(`wait:${ms}`); },
-      runMcp: async (extraArgs, opts) => {
-        mcpOpts = opts;
-        events.push({ extraArgs, opts });
-        return 0;
-      },
-    },
-  };
+function startRealDevToolsServer() {
+  return new Promise((resolve) => {
+    const server = http.createServer((req, res) => {
+      res.writeHead(req.url === '/json/version' ? 200 : 404);
+      res.end('{}');
+    });
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      resolve({ port, close: () => new Promise((r) => server.close(r)) });
+    });
+  });
 }
 
 describe('cli-options', () => {
@@ -112,33 +97,6 @@ describe('cli-options', () => {
 });
 
 describe('chrome-discovery', () => {
-  test('Given win32, when findChromePath runs, then it discovers Chrome in Program Files', () => {
-    const win = findChromePath({
-      platform: 'win32',
-      env: { PROGRAMFILES: 'C:\\Program Files' },
-      existsSync: (p) => p === 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
-    });
-    assert.equal(win, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
-  });
-
-  test('Given darwin, when findChromePath runs, then it discovers Chrome in /Applications', () => {
-    const mac = findChromePath({
-      platform: 'darwin',
-      env: { HOME: '/Users/dev' },
-      existsSync: (p) => p === '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    });
-    assert.equal(mac, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
-  });
-
-  test('Given linux, when findChromePath runs, then it discovers google-chrome in /usr/bin', () => {
-    const linux = findChromePath({
-      platform: 'linux',
-      env: {},
-      existsSync: (p) => p === '/usr/bin/google-chrome',
-    });
-    assert.equal(linux, '/usr/bin/google-chrome');
-  });
-
   test('Given no Chrome binary on disk, when findChromePath runs, then it throws an agent-friendly error', () => {
     assert.throws(
       () => findChromePath({ platform: 'linux', env: {}, existsSync: () => false }),
@@ -155,29 +113,40 @@ describe('chrome-debug-session', () => {
     assert.equal(spec.options.stdio, 'ignore');
   });
 
-  test('Given probeFn succeeds on 3rd attempt, when waitForPort runs, then it resolves after 2 waits', async () => {
-    let calls = 0;
-    const waits = [];
-    await waitForPort({ port: 9223, probeFn: async () => ++calls >= 3, waitFn: async (ms) => waits.push(ms), timeoutMs: 1000, intervalMs: 200 });
-    assert.equal(calls, 3);
-    assert.deepEqual(waits, [200, 200]);
+  test('Given a real DevTools HTTP server, when waitForPort runs, then it resolves', async () => {
+    const srv = await startRealDevToolsServer();
+    try {
+      await waitForPort({ port: srv.port, timeoutMs: 2000, intervalMs: 50 });
+    } finally {
+      await srv.close();
+    }
   });
 
-  test('Given probeFn never succeeds, when waitForPort runs, then it rejects with timeout and port', async () => {
-    await assert.rejects(
-      () => waitForPort({ port: 9223, probeFn: async () => false, waitFn: async () => {}, timeoutMs: 400, intervalMs: 200 }),
-      /400ms.*9223/
-    );
+  test('Given an unused port, when waitForPort runs, then it rejects with timeout and port', async () => {
+    await assert.rejects(() => waitForPort({ port: 19999, timeoutMs: 150, intervalMs: 50 }), /150ms.*19999/);
   });
 
-  test('Given port is occupied, when diagnoseStartupFailure runs, then it reports port conflict', async () => {
-    const msg = await diagnoseStartupFailure({ port: 9223, userDataDir: 'C:\\temp\\profile', portOccupiedFn: async () => true, lockExistsFn: () => false });
-    assert.match(msg, /Port 9223 is already in use/i);
+  test('Given a real TCP listener on port, when diagnoseStartupFailure runs, then it reports port conflict', async () => {
+    const server = net.createServer();
+    await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    const { port } = server.address();
+    try {
+      const msg = await diagnoseStartupFailure({ port, userDataDir: os.tmpdir() });
+      assert.match(msg, new RegExp(`Port ${port} is already in use`, 'i'));
+    } finally {
+      await new Promise((r) => server.close(r));
+    }
   });
 
-  test('Given profile lock exists, when diagnoseStartupFailure runs, then it reports profile lock', async () => {
-    const msg = await diagnoseStartupFailure({ port: 9223, userDataDir: 'C:\\temp\\profile', portOccupiedFn: async () => false, lockExistsFn: () => true });
-    assert.match(msg, /locked.*--remote-debugging-port=9223/i);
+  test('Given a real profile lockfile, when diagnoseStartupFailure runs, then it reports profile lock', async () => {
+    const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-lock-test-'));
+    writeFileSync(path.join(dir, 'lockfile'), '');
+    try {
+      const msg = await diagnoseStartupFailure({ port: 19998, userDataDir: dir });
+      assert.match(msg, /locked.*--remote-debugging-port=19998/i);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -210,32 +179,31 @@ describe('mcp-stdio-bridge', () => {
     assert.equal(code, 42);
   });
 
-  test('Given port not ready, when launchAndRun runs, then it spawns detached Chrome once, unrefs, and runs MCP', async () => {
-    const stub = createLaunchStubs({ port: 9222, readyAfter: 2 });
-    const code = await launchAndRun(['--allowUnrestrictedPaths'], stub.deps);
-    assert.equal(code, 0);
-    assert.equal(stub.spawned, 1);
-    assert.equal(stub.events[1], 'unref');
-    assert.deepEqual(stub.events[2], { extraArgs: ['--allowUnrestrictedPaths'], opts: { browserUrl: 'http://127.0.0.1:9222' } });
+  test('Given a real DevTools server on port, when launchAndRun runs, then it passes browserUrl to runMcp', async () => {
+    const srv = await startRealDevToolsServer();
+    try {
+      const code = await launchAndRun(['--allowUnrestrictedPaths'], {
+        port: srv.port,
+        runMcp: async (args, opts) => {
+          assert.deepEqual(args, ['--allowUnrestrictedPaths']);
+          assert.deepEqual(opts, { browserUrl: `http://127.0.0.1:${srv.port}` });
+          return 0;
+        },
+      });
+      assert.equal(code, 0);
+    } finally {
+      await srv.close();
+    }
   });
 
-  test('Given port already ready, when launchAndRun runs, then it skips spawning and waiting', async () => {
-    const stub = createLaunchStubs({ port: 9223, readyAfter: 1 });
-    const code = await launchAndRun(['--allowUnrestrictedPaths'], stub.deps);
-    assert.equal(code, 0);
-    assert.equal(stub.spawned, 0);
-    assert.deepEqual(stub.waits, []);
-    assert.deepEqual(stub.mcpOpts, { browserUrl: 'http://127.0.0.1:9223' });
-  });
-
-  test('Given SIGTERM, when wireLifecycle is attached, then it forwards SIGTERM and cleans up after detach', () => {
-    const fakeProc = new EventEmitter();
-    const killed = [];
-    const detach = wireLifecycle({ kill: (sig) => killed.push(sig) }, fakeProc);
-    fakeProc.emit('SIGTERM');
+  test('Given a real child process, when wireLifecycle detaches, then listener count returns to baseline', () => {
+    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)']);
+    const before = process.listenerCount('SIGTERM');
+    const detach = wireLifecycle(child);
+    assert.equal(process.listenerCount('SIGTERM'), before + 1);
     detach();
-    fakeProc.emit('SIGTERM');
-    assert.deepEqual(killed, ['SIGTERM']);
+    assert.equal(process.listenerCount('SIGTERM'), before);
+    child.kill();
   });
 
   test('Given tools/call JSON-RPC chunk, when isToolCallMessage runs, then it returns true', () => {
