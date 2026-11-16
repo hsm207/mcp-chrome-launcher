@@ -9,7 +9,7 @@ import { buildChromeSpawnSpec, isPortReady, waitForPort } from '../mcp-chrome-la
 /**
  * Application test: launches real Chrome with a temp profile and verifies DevTools HTTP readiness.
  */
-test('Application: real Chrome launches on debug port and exposes /json/version', async () => {
+test('Given a temp profile, when real Chrome launches on a debug port, then /json/version responds', async () => {
   const port = 19223;
   const userDataDir = mkdtempSync(path.join(os.tmpdir(), 'mcp-chrome-app-test-'));
   const spec = buildChromeSpawnSpec({ port, userDataDir });

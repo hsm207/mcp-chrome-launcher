@@ -52,67 +52,67 @@ function createLaunchStubs({ port = 9223, readyAfter = 1 } = {}) {
 }
 
 describe('cli-options', () => {
-  test('defaults userDataDir to ~/.chrome-dev-profile', () => {
+  test('Given no args, when partitionArgs runs, then userDataDir defaults to ~/.chrome-dev-profile', () => {
     assert.equal(partitionArgs([]).userDataDir, path.join(os.homedir(), '.chrome-dev-profile'));
   });
 
-  test('extracts --userDataDir= and forwards all other flags', () => {
+  test('Given --userDataDir=, when partitionArgs runs, then it extracts userDataDir and forwards remaining flags', () => {
     const result = partitionArgs(['--userDataDir=C:\\p', '--allowUnrestrictedPaths', '--logFile', 'C:\\a.log']);
     assert.equal(result.userDataDir, 'C:\\p');
     assert.deepEqual(result.mcpArgs, ['--allowUnrestrictedPaths', '--logFile', 'C:\\a.log']);
   });
 
-  test('handles space-separated --userDataDir', () => {
+  test('Given space-separated --userDataDir, when partitionArgs runs, then it extracts userDataDir', () => {
     const result = partitionArgs(['--userDataDir', 'C:\\p', '--allowUnrestrictedPaths']);
     assert.equal(result.userDataDir, 'C:\\p');
     assert.deepEqual(result.mcpArgs, ['--allowUnrestrictedPaths']);
   });
 
-  test('defaults port to 9223', () => {
+  test('Given no args, when partitionArgs runs, then port defaults to 9223', () => {
     assert.equal(partitionArgs([]).port, 9223);
   });
 
-  test('extracts --port=9225', () => {
+  test('Given --port=9225, when partitionArgs runs, then it extracts port 9225 and forwards remaining flags', () => {
     const result = partitionArgs(['--port=9225', '--allowUnrestrictedPaths']);
     assert.equal(result.port, 9225);
     assert.deepEqual(result.mcpArgs, ['--allowUnrestrictedPaths']);
   });
 
-  test('handles space-separated --port', () => {
+  test('Given space-separated --port, when partitionArgs runs, then it extracts port', () => {
     assert.equal(partitionArgs(['--port', '9226']).port, 9226);
   });
 
-  test('throws on invalid --port', () => {
+  test('Given invalid --port, when partitionArgs runs, then it throws an error', () => {
     assert.throws(() => partitionArgs(['--port=abc']), /Invalid --port/i);
   });
 
-  test('defaults chromePath to null', () => {
+  test('Given no args, when partitionArgs runs, then chromePath defaults to null', () => {
     assert.equal(partitionArgs([]).chromePath, null);
   });
 
-  test('extracts --chromePath=', () => {
+  test('Given --chromePath=, when partitionArgs runs, then it extracts chromePath and forwards remaining flags', () => {
     const result = partitionArgs(['--chromePath=/custom/chrome', '--allowUnrestrictedPaths']);
     assert.equal(result.chromePath, '/custom/chrome');
     assert.deepEqual(result.mcpArgs, ['--allowUnrestrictedPaths']);
   });
 
-  test('handles space-separated --chromePath', () => {
+  test('Given space-separated --chromePath, when partitionArgs runs, then it extracts chromePath', () => {
     assert.equal(partitionArgs(['--chromePath', '/custom/chrome']).chromePath, '/custom/chrome');
   });
 
-  test('detects --help and -h flags', () => {
+  test('Given --help or -h, when partitionArgs runs, then help is true', () => {
     assert.equal(partitionArgs(['--help']).help, true);
     assert.equal(partitionArgs(['-h']).help, true);
   });
 
-  test('detects --version and -v flags', () => {
+  test('Given --version or -v, when partitionArgs runs, then version is true', () => {
     assert.equal(partitionArgs(['--version']).version, true);
     assert.equal(partitionArgs(['-v']).version, true);
   });
 });
 
 describe('chrome-discovery', () => {
-  test('discovers Chrome on win32', () => {
+  test('Given win32, when findChromePath runs, then it discovers Chrome in Program Files', () => {
     const win = findChromePath({
       platform: 'win32',
       env: { PROGRAMFILES: 'C:\\Program Files' },
@@ -121,7 +121,7 @@ describe('chrome-discovery', () => {
     assert.equal(win, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
   });
 
-  test('discovers Chrome on darwin', () => {
+  test('Given darwin, when findChromePath runs, then it discovers Chrome in /Applications', () => {
     const mac = findChromePath({
       platform: 'darwin',
       env: { HOME: '/Users/dev' },
@@ -130,7 +130,7 @@ describe('chrome-discovery', () => {
     assert.equal(mac, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
   });
 
-  test('discovers Chrome on linux', () => {
+  test('Given linux, when findChromePath runs, then it discovers google-chrome in /usr/bin', () => {
     const linux = findChromePath({
       platform: 'linux',
       env: {},
@@ -139,7 +139,7 @@ describe('chrome-discovery', () => {
     assert.equal(linux, '/usr/bin/google-chrome');
   });
 
-  test('throws agent-friendly error when no Chrome is found', () => {
+  test('Given no Chrome binary on disk, when findChromePath runs, then it throws an agent-friendly error', () => {
     assert.throws(
       () => findChromePath({ platform: 'linux', env: {}, existsSync: () => false }),
       /Chrome executable not found.*--chromePath=<path>/s
@@ -148,14 +148,14 @@ describe('chrome-discovery', () => {
 });
 
 describe('chrome-debug-session', () => {
-  test('buildChromeSpawnSpec configures detached Chrome on 9222 with userDataDir', () => {
+  test('Given port and userDataDir, when buildChromeSpawnSpec runs, then it configures detached Chrome', () => {
     const spec = buildChromeSpawnSpec({ port: 9222, userDataDir: 'C:\\temp\\chrome-dev-profile-test' });
     assert.deepEqual(spec.args, ['--remote-debugging-port=9222', '--user-data-dir=C:\\temp\\chrome-dev-profile-test']);
     assert.equal(spec.options.detached, true);
     assert.equal(spec.options.stdio, 'ignore');
   });
 
-  test('waitForPort resolves once probeFn returns true', async () => {
+  test('Given probeFn succeeds on 3rd attempt, when waitForPort runs, then it resolves after 2 waits', async () => {
     let calls = 0;
     const waits = [];
     await waitForPort({ port: 9223, probeFn: async () => ++calls >= 3, waitFn: async (ms) => waits.push(ms), timeoutMs: 1000, intervalMs: 200 });
@@ -163,26 +163,26 @@ describe('chrome-debug-session', () => {
     assert.deepEqual(waits, [200, 200]);
   });
 
-  test('waitForPort rejects with port and timeout when probeFn never succeeds', async () => {
+  test('Given probeFn never succeeds, when waitForPort runs, then it rejects with timeout and port', async () => {
     await assert.rejects(
       () => waitForPort({ port: 9223, probeFn: async () => false, waitFn: async () => {}, timeoutMs: 400, intervalMs: 200 }),
       /400ms.*9223/
     );
   });
 
-  test('diagnoseStartupFailure reports port conflict when port is occupied', async () => {
+  test('Given port is occupied, when diagnoseStartupFailure runs, then it reports port conflict', async () => {
     const msg = await diagnoseStartupFailure({ port: 9223, userDataDir: 'C:\\temp\\profile', portOccupiedFn: async () => true, lockExistsFn: () => false });
     assert.match(msg, /Port 9223 is already in use/i);
   });
 
-  test('diagnoseStartupFailure reports profile lock when lockfile exists without debug port', async () => {
+  test('Given profile lock exists, when diagnoseStartupFailure runs, then it reports profile lock', async () => {
     const msg = await diagnoseStartupFailure({ port: 9223, userDataDir: 'C:\\temp\\profile', portOccupiedFn: async () => false, lockExistsFn: () => true });
     assert.match(msg, /locked.*--remote-debugging-port=9223/i);
   });
 });
 
 describe('mcp-stdio-bridge', () => {
-  test('buildMcpSpawnSpec defaults to npx chrome-devtools-mcp@latest with inherited stdio', () => {
+  test('Given no args, when buildMcpSpawnSpec runs, then it defaults to npx chrome-devtools-mcp@latest', () => {
     const spec = buildMcpSpawnSpec([]);
     assert.equal(spec.command, 'npx');
     assert.deepEqual(spec.args, ['-y', 'chrome-devtools-mcp@latest']);
@@ -190,35 +190,36 @@ describe('mcp-stdio-bridge', () => {
     assert.equal(spec.options.shell, process.platform === 'win32');
   });
 
-  test('buildMcpSpawnSpec forwards caller args after package name', () => {
+  test('Given caller args, when buildMcpSpawnSpec runs, then it forwards them after package name', () => {
     const spec = buildMcpSpawnSpec(['--allowUnrestrictedPaths', '--categoryExtensions']);
     assert.deepEqual(spec.args, ['-y', 'chrome-devtools-mcp@latest', '--allowUnrestrictedPaths', '--categoryExtensions']);
   });
 
-  test('buildMcpSpawnSpec includes --browserUrl when provided', () => {
+  test('Given browserUrl, when buildMcpSpawnSpec runs, then it includes --browserUrl', () => {
     const spec = buildMcpSpawnSpec(['--allowUnrestrictedPaths'], { browserUrl: 'http://127.0.0.1:9222' });
     assert.deepEqual(spec.args, ['-y', 'chrome-devtools-mcp@latest', '--browserUrl=http://127.0.0.1:9222', '--allowUnrestrictedPaths']);
   });
 
-  test('runPassthrough preserves child exit code without polluting stdout', async () => {
+  test('Given child exits 0, when runPassthrough runs, then it resolves with 0', async () => {
     const code = await runPassthrough([], () => ({ command: process.execPath, args: ['-e', 'process.exit(0)'], options: { stdio: 'inherit' } }));
     assert.equal(code, 0);
   });
 
-  test('runPassthrough forwards non-zero child exit code', async () => {
+  test('Given child exits 42, when runPassthrough runs, then it forwards exit code 42', async () => {
     const code = await runPassthrough([], () => ({ command: process.execPath, args: ['-e', 'process.exit(42)'], options: { stdio: 'inherit' } }));
     assert.equal(code, 42);
   });
 
-  test('launchAndRun spawns detached Chrome, unrefs, waits, and runs MCP with browserUrl', async () => {
+  test('Given port not ready, when launchAndRun runs, then it spawns detached Chrome once, unrefs, and runs MCP', async () => {
     const stub = createLaunchStubs({ port: 9222, readyAfter: 2 });
     const code = await launchAndRun(['--allowUnrestrictedPaths'], stub.deps);
     assert.equal(code, 0);
+    assert.equal(stub.spawned, 1);
     assert.equal(stub.events[1], 'unref');
     assert.deepEqual(stub.events[2], { extraArgs: ['--allowUnrestrictedPaths'], opts: { browserUrl: 'http://127.0.0.1:9222' } });
   });
 
-  test('launchAndRun skips spawning and waiting when port is already ready', async () => {
+  test('Given port already ready, when launchAndRun runs, then it skips spawning and waiting', async () => {
     const stub = createLaunchStubs({ port: 9223, readyAfter: 1 });
     const code = await launchAndRun(['--allowUnrestrictedPaths'], stub.deps);
     assert.equal(code, 0);
@@ -227,14 +228,7 @@ describe('mcp-stdio-bridge', () => {
     assert.deepEqual(stub.mcpOpts, { browserUrl: 'http://127.0.0.1:9223' });
   });
 
-  test('launchAndRun spawns Chrome once when port is not initially ready', async () => {
-    const stub = createLaunchStubs({ port: 9223, readyAfter: 2 });
-    const code = await launchAndRun([], stub.deps);
-    assert.equal(code, 0);
-    assert.equal(stub.spawned, 1);
-  });
-
-  test('wireLifecycle forwards SIGTERM to child and cleans up listeners', () => {
+  test('Given SIGTERM, when wireLifecycle is attached, then it forwards SIGTERM and cleans up after detach', () => {
     const fakeProc = new EventEmitter();
     const killed = [];
     const detach = wireLifecycle({ kill: (sig) => killed.push(sig) }, fakeProc);
@@ -244,11 +238,11 @@ describe('mcp-stdio-bridge', () => {
     assert.deepEqual(killed, ['SIGTERM']);
   });
 
-  test('isToolCallMessage returns true for tools/call JSON-RPC messages', () => {
+  test('Given tools/call JSON-RPC chunk, when isToolCallMessage runs, then it returns true', () => {
     assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}\n'), true);
   });
 
-  test('isToolCallMessage returns false for non-tools/call JSON-RPC messages', () => {
+  test('Given initialize or tools/list chunk, when isToolCallMessage runs, then it returns false', () => {
     assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'), false);
     assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'), false);
   });
