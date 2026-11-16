@@ -40,6 +40,7 @@ function cleanupTempDir(dir) {
 function createLauncherTracker(tempDir) {
   const children = [];
   const ports = [];
+  let nextId = 1;
 
   return {
     spawn: (port, extraArgs = []) => {
@@ -52,7 +53,9 @@ function createLauncherTracker(tempDir) {
       let stderr = '';
       child.stderr?.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
       children.push(child);
-      return { child, getStderr: () => stderr };
+      const sendRpc = (method, params = {}) =>
+        child.stdin.write(`${JSON.stringify({ jsonrpc: '2.0', id: nextId++, method, params })}\n`);
+      return { child, sendRpc, getStderr: () => stderr };
     },
     cleanup: () => cleanupLauncherResources(ports, children),
   };
