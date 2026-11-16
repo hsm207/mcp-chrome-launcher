@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import net from 'node:net';
+import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 
-const DEFAULT_CHROME_PATH = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
 const DEFAULT_PORT = 9223;
-const DEFAULT_USER_DATA_DIR = 'C:\\Users\\mohds\\.chrome-dev-profile';
+const DEFAULT_USER_DATA_DIR = path.join(os.homedir(), '.chrome-dev-profile');
 
 /**
  * Spawns detached Chrome on the debug port, waits, then runs chrome-devtools-mcp attached to it.
@@ -17,10 +17,11 @@ const DEFAULT_USER_DATA_DIR = 'C:\\Users\\mohds\\.chrome-dev-profile';
 export async function launchAndRun(
   extraArgs = [],
   {
-    port = DEFAULT_PORT,
+    port = null,
     userDataDir = DEFAULT_USER_DATA_DIR,
+    chromePath = null,
     spawnChrome = spawn,
-    probeFn = () => isPortReady(port),
+    probeFn = null,
     waitFn = delay,
     timeoutMs = 15000,
     intervalMs = 200,
@@ -28,18 +29,25 @@ export async function launchAndRun(
   } = {}
 ) {
   const parsed = partitionArgs(extraArgs);
+  const resolvedPort = port ?? parsed.port;
   const resolvedUserDataDir = userDataDir ?? parsed.userDataDir;
+  const resolvedChromePath = chromePath ?? parsed.chromePath ?? undefined;
+  const resolvedProbeFn = probeFn ?? (() => isPortReady(resolvedPort));
 
   const ensureChrome = async () => {
-    if (!(await probeFn())) {
-      const chromeSpec = buildChromeSpawnSpec({ port, userDataDir: resolvedUserDataDir });
+    if (!(await resolvedProbeFn())) {
+      const chromeSpec = buildChromeSpawnSpec({
+        port: resolvedPort,
+        userDataDir: resolvedUserDataDir,
+        chromePath: resolvedChromePath,
+      });
       const chrome = spawnChrome(chromeSpec.command, chromeSpec.args, chromeSpec.options);
       chrome.unref();
 
       try {
-        await waitForPort({ port, probeFn, waitFn, timeoutMs, intervalMs });
+        await waitForPort({ port: resolvedPort, probeFn: resolvedProbeFn, waitFn, timeoutMs, intervalMs });
       } catch (err) {
-        const diagnosis = await diagnoseStartupFailure({ port, userDataDir: resolvedUserDataDir });
+        const diagnosis = await diagnoseStartupFailure({ port: resolvedPort, userDataDir: resolvedUserDataDir });
         throw new Error(`${err.message}. ${diagnosis}`);
       }
     }
@@ -47,11 +55,11 @@ export async function launchAndRun(
 
   if (runMcp) {
     await ensureChrome();
-    return runMcp(parsed.mcpArgs, { browserUrl: `http://127.0.0.1:${port}` });
+    return runMcp(parsed.mcpArgs, { browserUrl: `http://127.0.0.1:${resolvedPort}` });
   }
 
   const { command, args, options } = buildMcpSpawnSpec(parsed.mcpArgs, {
-    browserUrl: `http://127.0.0.1:${port}`,
+    browserUrl: `http://127.0.0.1:${resolvedPort}`,
   });
 
   return new Promise((resolve, reject) => {
@@ -122,22 +130,40 @@ export function runPassthrough(extraArgs = [], specBuilder = buildMcpSpawnSpec) 
  * @param {string[]} [args]
  */
 export function partitionArgs(args = []) {
+  let port = DEFAULT_PORT;
   let userDataDir = DEFAULT_USER_DATA_DIR;
+  let chromePath = null;
   let headless = false;
   const mcpArgs = [];
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg.startsWith('--userDataDir=')) {
+    if (arg.startsWith('--port=')) {
+      port = parsePort(arg.slice('--port='.length));
+    } else if (arg === '--port' && i + 1 < args.length) {
+      port = parsePort(args[++i]);
+    } else if (arg.startsWith('--userDataDir=')) {
       userDataDir = arg.slice('--userDataDir='.length);
     } else if (arg === '--userDataDir' && i + 1 < args.length) {
       userDataDir = args[++i];
+    } else if (arg.startsWith('--chromePath=')) {
+      chromePath = arg.slice('--chromePath='.length);
+    } else if (arg === '--chromePath' && i + 1 < args.length) {
+      chromePath = args[++i];
     } else {
       mcpArgs.push(arg);
     }
   }
 
-  return { userDataDir, headless, mcpArgs };
+  return { port, userDataDir, chromePath, headless, mcpArgs };
+}
+
+function parsePort(raw) {
+  const port = Number(raw);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid --port value "${raw}". Expected an integer between 1 and 65535.`);
+  }
+  return port;
 }
 
 /**
@@ -147,13 +173,57 @@ export function partitionArgs(args = []) {
 export function buildChromeSpawnSpec({
   port = DEFAULT_PORT,
   userDataDir = DEFAULT_USER_DATA_DIR,
-  chromePath = DEFAULT_CHROME_PATH,
+  chromePath = null,
 } = {}) {
   return {
-    command: chromePath,
+    command: chromePath ?? findChromePath(),
     args: [`--remote-debugging-port=${port}`, `--user-data-dir=${userDataDir}`],
     options: { detached: true, stdio: 'ignore' },
   };
+}
+
+/**
+ * Discovers the Chrome executable path for the current platform.
+ * @param {{ platform?: string, env?: Record<string, string | undefined>, existsSync?: (p: string) => boolean }} [opts]
+ * @returns {string}
+ */
+export function findChromePath({
+  platform = process.platform,
+  env = process.env,
+  existsSync: existsFn = existsSync,
+} = {}) {
+  const candidates = getChromeCandidates(platform, env);
+  const found = candidates.find((candidate) => existsFn(candidate));
+  if (found) {
+    return found;
+  }
+  throw new Error(
+    `Chrome executable not found for platform "${platform}". Searched:\n` +
+      candidates.map((c) => `  - ${c}`).join('\n') +
+      '\nPass --chromePath=<path> in your MCP server args.'
+  );
+}
+
+function getChromeCandidates(platform, env) {
+  if (platform === 'win32') {
+    const roots = [env.PROGRAMFILES, env['PROGRAMFILES(X86)'], env.LOCALAPPDATA].filter(Boolean);
+    return roots.map((root) => path.win32.join(root, 'Google', 'Chrome', 'Application', 'chrome.exe'));
+  }
+  if (platform === 'darwin') {
+    const home = env.HOME || os.homedir();
+    return [
+      '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+      path.posix.join(home, 'Applications', 'Google Chrome.app', 'Contents', 'MacOS', 'Google Chrome'),
+      '/Applications/Chromium.app/Contents/MacOS/Chromium',
+    ];
+  }
+  return [
+    '/usr/bin/google-chrome',
+    '/usr/bin/google-chrome-stable',
+    '/usr/bin/chromium',
+    '/usr/bin/chromium-browser',
+    '/snap/bin/chromium',
+  ];
 }
 
 /**

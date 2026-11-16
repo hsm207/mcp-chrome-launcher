@@ -1,10 +1,13 @@
-import test from 'node:test';
+import test, { describe } from 'node:test';
 import assert from 'node:assert/strict';
+import os from 'node:os';
+import path from 'node:path';
 import { EventEmitter } from 'node:events';
 import {
   buildChromeSpawnSpec,
   buildMcpSpawnSpec,
   diagnoseStartupFailure,
+  findChromePath,
   launchAndRun,
   partitionArgs,
   runPassthrough,
@@ -229,4 +232,77 @@ test('Test 19: isToolCallMessage returns false for non-tools/call JSON-RPC messa
   const { isToolCallMessage } = await import('./mcp-chrome-launcher.mjs');
   assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'), false);
   assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'), false);
+});
+
+test('Test 20: partitionArgs defaults userDataDir to ~/.chrome-dev-profile', () => {
+  const result = partitionArgs([]);
+  assert.equal(result.userDataDir, path.join(os.homedir(), '.chrome-dev-profile'));
+});
+
+test('Test 21a: partitionArgs defaults port to 9223', () => {
+  assert.equal(partitionArgs([]).port, 9223);
+});
+
+test('Test 21b: partitionArgs extracts --port=9225', () => {
+  const result = partitionArgs(['--port=9225', '--allowUnrestrictedPaths']);
+  assert.equal(result.port, 9225);
+  assert.deepEqual(result.mcpArgs, ['--allowUnrestrictedPaths']);
+});
+
+test('Test 22: partitionArgs handles space-separated --port', () => {
+  const result = partitionArgs(['--port', '9226']);
+  assert.equal(result.port, 9226);
+});
+
+test('Test 23: partitionArgs throws on invalid --port', () => {
+  assert.throws(() => partitionArgs(['--port=abc']), /Invalid --port/i);
+});
+
+test('Test 24a: partitionArgs defaults chromePath to null', () => {
+  assert.equal(partitionArgs([]).chromePath, null);
+});
+
+test('Test 24b: partitionArgs extracts --chromePath=', () => {
+  const result = partitionArgs(['--chromePath=/custom/chrome', '--allowUnrestrictedPaths']);
+  assert.equal(result.chromePath, '/custom/chrome');
+  assert.deepEqual(result.mcpArgs, ['--allowUnrestrictedPaths']);
+});
+
+test('Test 25: partitionArgs handles space-separated --chromePath', () => {
+  const result = partitionArgs(['--chromePath', '/custom/chrome']);
+  assert.equal(result.chromePath, '/custom/chrome');
+});
+
+test('Test 26a: findChromePath discovers Chrome on win32', () => {
+  const win = findChromePath({
+    platform: 'win32',
+    env: { PROGRAMFILES: 'C:\\Program Files' },
+    existsSync: (p) => p === 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe',
+  });
+  assert.equal(win, 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe');
+});
+
+test('Test 26b: findChromePath discovers Chrome on darwin', () => {
+  const mac = findChromePath({
+    platform: 'darwin',
+    env: { HOME: '/Users/dev' },
+    existsSync: (p) => p === '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+  });
+  assert.equal(mac, '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+});
+
+test('Test 26c: findChromePath discovers Chrome on linux', () => {
+  const linux = findChromePath({
+    platform: 'linux',
+    env: {},
+    existsSync: (p) => p === '/usr/bin/google-chrome',
+  });
+  assert.equal(linux, '/usr/bin/google-chrome');
+});
+
+test('Test 27: findChromePath throws agent-friendly error when no Chrome is found', () => {
+  assert.throws(
+    () => findChromePath({ platform: 'linux', env: {}, existsSync: () => false }),
+    /Chrome executable not found.*--chromePath=<path>/s
+  );
 });
