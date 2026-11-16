@@ -67,34 +67,48 @@ test('Test 5: buildMcpSpawnSpec includes --browserUrl when provided', () => {
   ]);
 });
 
-test('Test 6: launchAndRun spawns detached Chrome, unrefs, waits, and runs MCP with browserUrl', async () => {
+/**
+ * Builds deterministic stub dependencies and call-recording arrays for `launchAndRun` tests.
+ * @param {{ port?: number, readyAfter?: number }} [opts]
+ */
+function createLaunchStubs({ port = 9223, readyAfter = 1 } = {}) {
   const events = [];
-  const fakeSpawn = (cmd, args, opts) => {
-    events.push({ cmd, args, opts });
-    return { unref: () => events.push('unref') };
-  };
-  const fakeWait = async (ms) => events.push(`wait:${ms}`);
-  const fakeRunMcp = async (extraArgs, opts) => {
-    events.push({ extraArgs, opts });
-    return 0;
-  };
-
+  const waits = [];
+  let spawned = 0;
   let probeCalls = 0;
-  const code = await launchAndRun(['--allowUnrestrictedPaths'], {
-    port: 9222,
-    userDataDir: 'C:\\temp\\profile',
-    spawnChrome: fakeSpawn,
-    probeFn: async () => ++probeCalls >= 2,
-    waitFn: fakeWait,
-    runMcp: fakeRunMcp,
-  });
+  let mcpOpts = null;
+
+  return {
+    events,
+    waits,
+    get spawned() { return spawned; },
+    get mcpOpts() { return mcpOpts; },
+    deps: {
+      port,
+      userDataDir: 'C:\\temp\\profile',
+      spawnChrome: (cmd, args, opts) => {
+        spawned++;
+        events.push({ cmd, args, opts });
+        return { unref: () => events.push('unref') };
+      },
+      probeFn: async () => ++probeCalls >= readyAfter,
+      waitFn: async (ms) => { waits.push(ms); events.push(`wait:${ms}`); },
+      runMcp: async (extraArgs, opts) => {
+        mcpOpts = opts;
+        events.push({ extraArgs, opts });
+        return 0;
+      },
+    },
+  };
+}
+
+test('Test 6: launchAndRun spawns detached Chrome, unrefs, waits, and runs MCP with browserUrl', async () => {
+  const stub = createLaunchStubs({ port: 9222, readyAfter: 2 });
+  const code = await launchAndRun(['--allowUnrestrictedPaths'], stub.deps);
 
   assert.equal(code, 0);
-  assert.equal(events[1], 'unref');
-  assert.deepEqual(events[2], {
-    extraArgs: ['--allowUnrestrictedPaths'],
-    opts: { browserUrl: 'http://127.0.0.1:9222' },
-  });
+  assert.equal(stub.events[1], 'unref');
+  assert.deepEqual(stub.events[2], { extraArgs: ['--allowUnrestrictedPaths'], opts: { browserUrl: 'http://127.0.0.1:9222' } });
 });
 
 test('Test 7: waitForPort resolves once probeFn returns true', async () => {
@@ -119,61 +133,22 @@ test('Test 8: waitForPort rejects with port and timeout when probeFn never succe
   );
 });
 
-test('Test 9: launchAndRun polls readiness instead of fixed 5000ms wait', async () => {
-  const waits = [];
-  const code = await launchAndRun(['--allowUnrestrictedPaths'], {
-    port: 9223,
-    userDataDir: 'C:\\temp\\profile',
-    spawnChrome: () => ({ unref: () => {} }),
-    probeFn: async () => true,
-    waitFn: async (ms) => waits.push(ms),
-    runMcp: async () => 0,
-  });
+test('Test 9: launchAndRun skips spawning and waiting when port is already ready', async () => {
+  const stub = createLaunchStubs({ port: 9223, readyAfter: 1 });
+  const code = await launchAndRun(['--allowUnrestrictedPaths'], stub.deps);
 
   assert.equal(code, 0);
-  assert.deepEqual(waits, []);
-});
-
-test('Test 10: launchAndRun skips spawning Chrome when port is already ready', async () => {
-  let spawned = 0;
-  let mcpOpts = null;
-  const code = await launchAndRun(['--allowUnrestrictedPaths'], {
-    port: 9223,
-    userDataDir: 'C:\\temp\\profile',
-    spawnChrome: () => {
-      spawned++;
-      return { unref: () => {} };
-    },
-    probeFn: async () => true,
-    waitFn: async () => {},
-    runMcp: async (_args, opts) => {
-      mcpOpts = opts;
-      return 0;
-    },
-  });
-
-  assert.equal(code, 0);
-  assert.equal(spawned, 0);
-  assert.deepEqual(mcpOpts, { browserUrl: 'http://127.0.0.1:9223' });
+  assert.equal(stub.spawned, 0);
+  assert.deepEqual(stub.waits, []);
+  assert.deepEqual(stub.mcpOpts, { browserUrl: 'http://127.0.0.1:9223' });
 });
 
 test('Test 11: launchAndRun spawns Chrome once when port is not initially ready', async () => {
-  let spawned = 0;
-  let probeCalls = 0;
-  const code = await launchAndRun([], {
-    port: 9223,
-    userDataDir: 'C:\\temp\\profile',
-    spawnChrome: () => {
-      spawned++;
-      return { unref: () => {} };
-    },
-    probeFn: async () => ++probeCalls >= 2,
-    waitFn: async () => {},
-    runMcp: async () => 0,
-  });
+  const stub = createLaunchStubs({ port: 9223, readyAfter: 2 });
+  const code = await launchAndRun([], stub.deps);
 
   assert.equal(code, 0);
-  assert.equal(spawned, 1);
+  assert.equal(stub.spawned, 1);
 });
 
 test('Test 12: partitionArgs extracts --userDataDir and forwards all other flags', () => {
@@ -245,17 +220,13 @@ test('Test 17: diagnoseStartupFailure reports profile lock when lockfile exists 
   assert.match(msg, /locked.*--remote-debugging-port=9223/i);
 });
 
-test('Test 18: launchAndRun does not spawn Chrome on startup when lazy=true until tools/call', async () => {
-  let spawned = 0;
-  const fakeEnsure = async () => {
-    spawned++;
-  };
+test('Test 18: isToolCallMessage returns true for tools/call JSON-RPC messages', async () => {
   const { isToolCallMessage } = await import('./mcp-chrome-launcher.mjs');
+  assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}\n'), true);
+});
 
+test('Test 19: isToolCallMessage returns false for non-tools/call JSON-RPC messages', async () => {
+  const { isToolCallMessage } = await import('./mcp-chrome-launcher.mjs');
   assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":1,"method":"initialize"}\n'), false);
   assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":2,"method":"tools/list"}\n'), false);
-  assert.equal(isToolCallMessage('{"jsonrpc":"2.0","id":3,"method":"tools/call","params":{}}\n'), true);
-  assert.equal(spawned, 0);
-  await fakeEnsure();
-  assert.equal(spawned, 1);
 });
