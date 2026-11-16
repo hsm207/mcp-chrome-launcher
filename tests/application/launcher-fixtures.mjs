@@ -15,16 +15,34 @@ export const test = base.extend({
   tempDir: async ({}, use) => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-chrome-app-'));
     await use(dir);
-    try {
-      rmSync(dir, { recursive: true, force: true });
-    } catch {
-      // Windows Crashpad may briefly hold temp profile lock
-    }
+    cleanupTempDir(dir);
   },
   launcher: async ({ tempDir }, use) => {
-    const children = [];
-    const ports = [];
-    const spawnLauncher = (port, extraArgs = []) => {
+    const tracker = createLauncherTracker(tempDir);
+    await use(tracker.spawn);
+    await tracker.cleanup();
+  },
+  occupiedPort: async ({}, use) => {
+    const { blocker, sockets } = await startOccupiedPortServer();
+    await use(blocker.address().port);
+    await closeOccupiedPortServer(blocker, sockets);
+  },
+});
+
+function cleanupTempDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Windows Crashpad may briefly hold temp profile lock
+  }
+}
+
+function createLauncherTracker(tempDir) {
+  const children = [];
+  const ports = [];
+
+  return {
+    spawn: (port, extraArgs = []) => {
       if (port) ports.push(port);
       const child = execa(
         process.execPath,
@@ -32,61 +50,67 @@ export const test = base.extend({
         { reject: false, stdin: 'pipe', stdout: 'ignore', stderr: 'pipe' }
       );
       let stderr = '';
-      child.stderr?.on('data', (chunk) => {
-        stderr += chunk.toString('utf8');
-      });
+      child.stderr?.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
       children.push(child);
       return { child, getStderr: () => stderr };
-    };
+    },
+    cleanup: () => cleanupLauncherResources(ports, children),
+  };
+}
 
-    await use(spawnLauncher);
+async function cleanupLauncherResources(ports, children) {
+  for (const port of ports) {
+    await closeChromeOnPort(port);
+  }
+  for (const child of children) {
+    await terminateChild(child);
+  }
+}
 
-    for (const port of ports) {
-      await closeChromeOnPort(port);
-    }
-    for (const child of children) {
-      child.stdin?.destroy();
-      child.stderr?.destroy();
-      if (child.pid && child.exitCode === null) {
-        await kill(child.pid, 'SIGKILL').catch(() => {});
-      }
-    }
-  },
-  occupiedPort: async ({}, use) => {
-    const sockets = new Set();
-    const blocker = net.createServer((socket) => {
-      sockets.add(socket);
-      socket.on('error', () => {});
-      socket.once('close', () => sockets.delete(socket));
-      socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-    });
-    await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
-    await use(blocker.address().port);
-    for (const socket of sockets) socket.destroy();
-    await new Promise((r) => blocker.close(r));
-  },
-});
+async function terminateChild(child) {
+  child.stdin?.destroy();
+  child.stderr?.destroy();
+  if (child.pid && child.exitCode === null) {
+    await kill(child.pid, 'SIGKILL').catch(() => {});
+  }
+}
+
+async function startOccupiedPortServer() {
+  const sockets = new Set();
+  const blocker = net.createServer((socket) => trackAndRejectSocket(socket, sockets));
+  await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+  return { blocker, sockets };
+}
+
+function trackAndRejectSocket(socket, sockets) {
+  sockets.add(socket);
+  socket.on('error', () => {});
+  socket.once('close', () => sockets.delete(socket));
+  socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+}
+
+function closeOccupiedPortServer(blocker, sockets) {
+  for (const socket of sockets) socket.destroy();
+  return new Promise((r) => blocker.close(r));
+}
 
 async function closeChromeOnPort(port) {
   try {
     const res = await fetch(`http://127.0.0.1:${port}/json/version`);
     const { webSocketDebuggerUrl } = await res.json();
-    if (!webSocketDebuggerUrl) return;
-    await new Promise((resolve) => {
-      const ws = new WebSocket(webSocketDebuggerUrl);
-      const timer = setTimeout(() => {
-        ws.close();
-        resolve();
-      }, 1500);
-      const done = () => {
-        clearTimeout(timer);
-        resolve();
-      };
-      ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Browser.close' })));
-      ws.addEventListener('close', done);
-      ws.addEventListener('error', done);
-    });
+    if (webSocketDebuggerUrl) await sendBrowserClose(webSocketDebuggerUrl);
   } catch {
     // Port already closed
   }
+}
+
+function sendBrowserClose(wsUrl) {
+  return new Promise((resolve) => {
+    const ws = new WebSocket(wsUrl);
+    const timer = setTimeout(() => { ws.close(); resolve(); }, 1500);
+    const done = () => { clearTimeout(timer); resolve(); };
+    ws.addEventListener('open', () => ws.send(JSON.stringify({ id: 1, method: 'Browser.close' })));
+    ws.addEventListener('close', done);
+    ws.addEventListener('error', done);
+  });
 }
