@@ -1,6 +1,6 @@
 import { spawn } from 'node:child_process';
 import { setTimeout as delay } from 'node:timers/promises';
-import { DEFAULT_USER_DATA_DIR, partitionArgs } from './cli-options.mjs';
+import { partitionArgs } from './cli-options.mjs';
 import {
   buildChromeSpawnSpec,
   diagnoseStartupFailure,
@@ -13,92 +13,21 @@ import {
  * @param {string[]} [extraArgs]
  * @param {object} [deps]
  */
-export async function launchAndRun(
-  extraArgs = [],
-  {
-    port = null,
-    userDataDir = DEFAULT_USER_DATA_DIR,
-    chromePath = null,
-    spawnChrome = spawn,
-    probeFn = null,
-    waitFn = delay,
-    timeoutMs = 15000,
-    intervalMs = 200,
-    runMcp = null,
-  } = {}
-) {
-  const parsed = partitionArgs(extraArgs);
-  const resolvedPort = port ?? parsed.port;
-  const resolvedUserDataDir = userDataDir ?? parsed.userDataDir;
-  const resolvedChromePath = chromePath ?? parsed.chromePath ?? undefined;
-  const resolvedProbeFn = probeFn ?? (() => isPortReady(resolvedPort));
+export async function launchAndRun(extraArgs = [], deps = {}) {
+  const { port, mcpArgs, ensureChrome } = resolveLaunchConfig(extraArgs, deps);
 
-  const ensureChrome = async () => {
-    if (!(await resolvedProbeFn())) {
-      const chromeSpec = buildChromeSpawnSpec({
-        port: resolvedPort,
-        userDataDir: resolvedUserDataDir,
-        chromePath: resolvedChromePath,
-      });
-      const chrome = spawnChrome(chromeSpec.command, chromeSpec.args, chromeSpec.options);
-      chrome.unref();
-
-      try {
-        await waitForPort({ port: resolvedPort, probeFn: resolvedProbeFn, waitFn, timeoutMs, intervalMs });
-      } catch (err) {
-        const diagnosis = await diagnoseStartupFailure({ port: resolvedPort, userDataDir: resolvedUserDataDir });
-        throw new Error(`${err.message}. ${diagnosis}`);
-      }
-    }
-  };
-
-  if (runMcp) {
+  if (deps.runMcp) {
     await ensureChrome();
-    return runMcp(parsed.mcpArgs, { browserUrl: `http://127.0.0.1:${resolvedPort}` });
+    return deps.runMcp(mcpArgs, { browserUrl: `http://127.0.0.1:${port}` });
   }
 
-  const { command, args, options } = buildMcpSpawnSpec(parsed.mcpArgs, {
-    browserUrl: `http://127.0.0.1:${resolvedPort}`,
+  const { command, args, options } = buildMcpSpawnSpec(mcpArgs, {
+    browserUrl: `http://127.0.0.1:${port}`,
   });
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, { ...options, stdio: ['pipe', 'inherit', 'inherit'] });
-    const detach = wireLifecycle(child);
-    let inFlightEnsure = null;
-
-    process.stdin.on('data', async (chunk) => {
-      const text = chunk.toString('utf8');
-      if (isToolCallMessage(text)) {
-        process.stdin.pause();
-        try {
-          inFlightEnsure ??= ensureChrome().finally(() => {
-            inFlightEnsure = null;
-          });
-          await inFlightEnsure;
-        } catch (err) {
-          console.error(`[mcp-chrome-launcher] ${err.message}`);
-        } finally {
-          process.stdin.resume();
-        }
-      }
-      if (!child.stdin.destroyed) {
-        child.stdin.write(chunk);
-      }
-    });
-
-    process.stdin.on('end', () => {
-      if (!child.stdin.destroyed) child.stdin.end();
-    });
-
-    child.on('error', (err) => {
-      detach();
-      reject(err);
-    });
-    child.on('exit', (code, signal) => {
-      detach();
-      resolve(code ?? (signal ? 1 : 0));
-    });
-  });
+  const child = spawn(command, args, { ...options, stdio: ['pipe', 'inherit', 'inherit'] });
+  const detach = wireLifecycle(child);
+  bridgeStdio(child, ensureChrome);
+  return awaitChildExit(child, detach);
 }
 
 /**
@@ -109,19 +38,9 @@ export async function launchAndRun(
  */
 export function runPassthrough(extraArgs = [], specBuilder = buildMcpSpawnSpec) {
   const { command, args, options } = specBuilder(extraArgs);
-
-  return new Promise((resolve, reject) => {
-    const child = spawn(command, args, options);
-    const detach = wireLifecycle(child);
-    child.on('error', (err) => {
-      detach();
-      reject(err);
-    });
-    child.on('exit', (code, signal) => {
-      detach();
-      resolve(code ?? (signal ? 1 : 0));
-    });
-  });
+  const child = spawn(command, args, options);
+  const detach = wireLifecycle(child);
+  return awaitChildExit(child, detach);
 }
 
 /**
@@ -162,4 +81,99 @@ export function wireLifecycle(child, proc = process) {
  */
 export function isToolCallMessage(chunk) {
   return chunk.includes('"tools/call"');
+}
+
+function resolveLaunchConfig(extraArgs, deps) {
+  const parsed = partitionArgs(extraArgs);
+  const port = deps.port ?? parsed.port;
+  const userDataDir = deps.userDataDir ?? parsed.userDataDir;
+  const chromePath = deps.chromePath ?? parsed.chromePath ?? undefined;
+  const probeFn = deps.probeFn ?? (() => isPortReady(port));
+
+  const ensureChrome = createEnsureChrome({
+    port,
+    userDataDir,
+    chromePath,
+    spawnChrome: deps.spawnChrome ?? spawn,
+    probeFn,
+    waitFn: deps.waitFn ?? delay,
+    timeoutMs: deps.timeoutMs ?? 15000,
+    intervalMs: deps.intervalMs ?? 200,
+  });
+
+  return { port, mcpArgs: parsed.mcpArgs, ensureChrome };
+}
+
+function createEnsureChrome({
+  port,
+  userDataDir,
+  chromePath,
+  spawnChrome,
+  probeFn,
+  waitFn,
+  timeoutMs,
+  intervalMs,
+}) {
+  return async () => {
+    if (await probeFn()) return;
+
+    const chromeSpec = buildChromeSpawnSpec({ port, userDataDir, chromePath });
+    const chrome = spawnChrome(chromeSpec.command, chromeSpec.args, chromeSpec.options);
+    chrome.unref();
+
+    try {
+      await waitForPort({ port, probeFn, waitFn, timeoutMs, intervalMs });
+    } catch (err) {
+      const diagnosis = await diagnoseStartupFailure({ port, userDataDir });
+      throw new Error(`${err.message}. ${diagnosis}`);
+    }
+  };
+}
+
+function bridgeStdio(child, ensureChrome) {
+  const runEnsure = createSerializedEnsure(ensureChrome);
+
+  process.stdin.on('data', (chunk) => forwardStdinChunk(chunk, child, runEnsure));
+  process.stdin.on('end', () => {
+    if (!child.stdin.destroyed) child.stdin.end();
+  });
+}
+
+function createSerializedEnsure(ensureChrome) {
+  let inFlight = null;
+  return () => {
+    inFlight ??= ensureChrome().finally(() => {
+      inFlight = null;
+    });
+    return inFlight;
+  };
+}
+
+async function forwardStdinChunk(chunk, child, runEnsure) {
+  if (isToolCallMessage(chunk.toString('utf8'))) {
+    process.stdin.pause();
+    try {
+      await runEnsure();
+    } catch (err) {
+      console.error(`[mcp-chrome-launcher] ${err.message}`);
+    } finally {
+      process.stdin.resume();
+    }
+  }
+  if (!child.stdin.destroyed) {
+    child.stdin.write(chunk);
+  }
+}
+
+function awaitChildExit(child, detach) {
+  return new Promise((resolve, reject) => {
+    child.on('error', (err) => {
+      detach();
+      reject(err);
+    });
+    child.on('exit', (code, signal) => {
+      detach();
+      resolve(code ?? (signal ? 1 : 0));
+    });
+  });
 }
