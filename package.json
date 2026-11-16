@@ -5,7 +5,7 @@
   "type": "module",
   "main": "mcp-chrome-launcher.mjs",
   "scripts": {
-    "test": "node --test mcp-chrome-launcher.test.mjs",
+    "test": "node --test tests/programmer.test.mjs",
     "test:app": "node --test tests/application.test.mjs"
   },
   "license": "MIT"
