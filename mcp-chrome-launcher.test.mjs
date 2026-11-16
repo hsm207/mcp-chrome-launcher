@@ -306,3 +306,13 @@ test('Test 27: findChromePath throws agent-friendly error when no Chrome is foun
     /Chrome executable not found.*--chromePath=<path>/s
   );
 });
+
+test('Test 28: partitionArgs detects --help and -h flags', () => {
+  assert.equal(partitionArgs(['--help']).help, true);
+  assert.equal(partitionArgs(['-h']).help, true);
+});
+
+test('Test 29: partitionArgs detects --version and -v flags', () => {
+  assert.equal(partitionArgs(['--version']).version, true);
+  assert.equal(partitionArgs(['-v']).version, true);
+});

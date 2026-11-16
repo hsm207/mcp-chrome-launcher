@@ -1,4 +1,6 @@
+import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
+import { HELP_TEXT, partitionArgs } from './src/cli-options.mjs';
 import { launchAndRun } from './src/mcp-stdio-bridge.mjs';
 
 export { partitionArgs } from './src/cli-options.mjs';
@@ -20,7 +22,20 @@ export {
 } from './src/mcp-stdio-bridge.mjs';
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  launchAndRun(process.argv.slice(2))
+  const cliArgs = process.argv.slice(2);
+  const { help, version } = partitionArgs(cliArgs);
+
+  if (help) {
+    console.log(HELP_TEXT);
+    process.exit(0);
+  }
+  if (version) {
+    const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
+    console.log(pkg.version);
+    process.exit(0);
+  }
+
+  launchAndRun(cliArgs)
     .then((code) => process.exit(code))
     .catch((err) => {
       console.error(`[mcp-chrome-launcher] ${err.message}`);
