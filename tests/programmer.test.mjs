@@ -113,40 +113,31 @@ describe('chrome-debug-session', () => {
     assert.equal(spec.options.stdio, 'ignore');
   });
 
-  test('Given a real DevTools HTTP server, when waitForPort runs, then it resolves', async () => {
+  test('Given a real DevTools HTTP server, when waitForPort runs, then it resolves', async (t) => {
     const srv = await startRealDevToolsServer();
-    try {
-      await waitForPort({ port: srv.port, timeoutMs: 2000, intervalMs: 50 });
-    } finally {
-      await srv.close();
-    }
+    t.after(() => srv.close());
+    await waitForPort({ port: srv.port, timeoutMs: 2000, intervalMs: 50 });
   });
 
   test('Given an unused port, when waitForPort runs, then it rejects with timeout and port', async () => {
     await assert.rejects(() => waitForPort({ port: 19999, timeoutMs: 150, intervalMs: 50 }), /150ms.*19999/);
   });
 
-  test('Given a real TCP listener on port, when diagnoseStartupFailure runs, then it reports port conflict', async () => {
+  test('Given a real TCP listener on port, when diagnoseStartupFailure runs, then it reports port conflict', async (t) => {
     const server = net.createServer();
     await new Promise((r) => server.listen(0, '127.0.0.1', r));
+    t.after(() => new Promise((r) => server.close(r)));
     const { port } = server.address();
-    try {
-      const msg = await diagnoseStartupFailure({ port, userDataDir: os.tmpdir() });
-      assert.match(msg, new RegExp(`Port ${port} is already in use`, 'i'));
-    } finally {
-      await new Promise((r) => server.close(r));
-    }
+    const msg = await diagnoseStartupFailure({ port, userDataDir: os.tmpdir() });
+    assert.match(msg, new RegExp(`Port ${port} is already in use`, 'i'));
   });
 
-  test('Given a real profile lockfile, when diagnoseStartupFailure runs, then it reports profile lock', async () => {
+  test('Given a real profile lockfile, when diagnoseStartupFailure runs, then it reports profile lock', async (t) => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-lock-test-'));
+    t.after(() => rmSync(dir, { recursive: true, force: true }));
     writeFileSync(path.join(dir, 'lockfile'), '');
-    try {
-      const msg = await diagnoseStartupFailure({ port: 19998, userDataDir: dir });
-      assert.match(msg, /locked.*--remote-debugging-port=19998/i);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    const msg = await diagnoseStartupFailure({ port: 19998, userDataDir: dir });
+    assert.match(msg, /locked.*--remote-debugging-port=19998/i);
   });
 });
 
@@ -179,21 +170,18 @@ describe('mcp-stdio-bridge', () => {
     assert.equal(code, 42);
   });
 
-  test('Given a real DevTools server on port, when launchAndRun runs, then it passes browserUrl to runMcp', async () => {
+  test('Given a real DevTools server on port, when launchAndRun runs, then it passes browserUrl to runMcp', async (t) => {
     const srv = await startRealDevToolsServer();
-    try {
-      const code = await launchAndRun(['--allowUnrestrictedPaths'], {
-        port: srv.port,
-        runMcp: async (args, opts) => {
-          assert.deepEqual(args, ['--allowUnrestrictedPaths']);
-          assert.deepEqual(opts, { browserUrl: `http://127.0.0.1:${srv.port}` });
-          return 0;
-        },
-      });
-      assert.equal(code, 0);
-    } finally {
-      await srv.close();
-    }
+    t.after(() => srv.close());
+    const code = await launchAndRun(['--allowUnrestrictedPaths'], {
+      port: srv.port,
+      runMcp: async (args, opts) => {
+        assert.deepEqual(args, ['--allowUnrestrictedPaths']);
+        assert.deepEqual(opts, { browserUrl: `http://127.0.0.1:${srv.port}` });
+        return 0;
+      },
+    });
+    assert.equal(code, 0);
   });
 
   test('Given a real child process, when wireLifecycle detaches, then listener count returns to baseline', () => {
