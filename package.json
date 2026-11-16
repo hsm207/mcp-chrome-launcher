@@ -1,0 +1,11 @@
+{
+  "name": "mcp-chrome-launcher",
+  "version": "0.1.0",
+  "description": "Lazy-launching CDP wrapper for chrome-devtools-mcp that keeps Chrome open on a shared debugging port.",
+  "type": "module",
+  "main": "mcp-chrome-launcher.mjs",
+  "scripts": {
+    "test": "node --test"
+  },
+  "license": "MIT"
+}
