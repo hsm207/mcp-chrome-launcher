@@ -50,6 +50,19 @@ const test = base.extend({
       }
     }
   },
+  occupiedPort: async ({}, use) => {
+    const sockets = new Set();
+    const blocker = net.createServer((socket) => {
+      sockets.add(socket);
+      socket.on('error', () => {});
+      socket.once('close', () => sockets.delete(socket));
+      socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
+    });
+    await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
+    await use(blocker.address().port);
+    for (const socket of sockets) socket.destroy();
+    await new Promise((r) => blocker.close(r));
+  },
 });
 
 describe('application: mcp-chrome-launcher CLI', () => {
@@ -76,27 +89,12 @@ describe('application: mcp-chrome-launcher CLI', () => {
     await expect.poll(() => isPortReady(port), { timeout: 12000, interval: 250 }).toBe(true);
   }, 15000);
 
-  test('Given an occupied port, when tools/call arrives, then mcp-chrome-launcher logs port conflict to stderr', async ({ launcher }) => {
-    const sockets = new Set();
-    const blocker = net.createServer((socket) => {
-      sockets.add(socket);
-      socket.on('error', () => {});
-      socket.once('close', () => sockets.delete(socket));
-      socket.end('HTTP/1.1 404 Not Found\r\nConnection: close\r\n\r\n');
-    });
-    await new Promise((r) => blocker.listen(0, '127.0.0.1', r));
-    const { port } = blocker.address();
-
-    try {
-      const { child, getStderr } = launcher(port);
-      child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_pages"}}\n');
-      await expect.poll(getStderr, { timeout: 20000, interval: 250 }).toMatch(
-        new RegExp(`Port ${port} is already in use`, 'i')
-      );
-    } finally {
-      for (const socket of sockets) socket.destroy();
-      await new Promise((r) => blocker.close(r));
-    }
+  test('Given an occupied port, when tools/call arrives, then mcp-chrome-launcher logs port conflict to stderr', async ({ launcher, occupiedPort }) => {
+    const { child, getStderr } = launcher(occupiedPort);
+    child.stdin.write('{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_pages"}}\n');
+    await expect.poll(getStderr, { timeout: 20000, interval: 250 }).toMatch(
+      new RegExp(`Port ${occupiedPort} is already in use`, 'i')
+    );
   }, 25000);
 });
 
