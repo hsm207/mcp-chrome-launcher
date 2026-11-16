@@ -27,9 +27,13 @@ describe('application: mcp-chrome-launcher CLI', () => {
     });
 
     t.after(async () => {
-      killProcessTree(launcher);
+      launcher.stdin.end();
+      await Promise.race([
+        new Promise((resolve) => launcher.once('exit', resolve)),
+        new Promise((resolve) => setTimeout(() => { killProcessTree(launcher); resolve(); }, 5000)),
+      ]);
       await killChromeOnPort(port);
-      rmSync(userDataDir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
+      cleanupTempDir(userDataDir);
     });
 
     launcher.stdin.write('{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}\n');
@@ -40,6 +44,14 @@ describe('application: mcp-chrome-launcher CLI', () => {
     assert.equal(await isPortReady(port), true);
   });
 });
+
+function cleanupTempDir(dir) {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch {
+    // Windows Crashpad may briefly hold temp profile lock after Browser.close
+  }
+}
 
 function killProcessTree(child) {
   try {
@@ -73,6 +85,7 @@ async function killChromeOnPort(port) {
       ws.addEventListener('close', done);
       ws.addEventListener('error', done);
     });
+    await new Promise((r) => setTimeout(r, 300));
   } catch {
     // Port already closed
   }
