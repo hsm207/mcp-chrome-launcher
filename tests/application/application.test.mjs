@@ -34,7 +34,9 @@ describe('application: mcp-chrome-launcher CLI', () => {
   }, 25000);
 
   test('Given an occupied port, when tools/call arrives, then mcp-chrome-launcher logs port conflict to stderr', async ({ launcher, occupiedPort }) => {
-    const { sendRpc, getStderr } = launcher(occupiedPort);
+    // Node exits immediately on Chrome's flags, so this test never leaves behind a real
+    // browser that could not expose DevTools on the already-occupied port.
+    const { sendRpc, getStderr } = launcher(occupiedPort, [`--chromePath=${process.execPath}`]);
     sendRpc('tools/call', { name: 'list_pages' });
     await expect.poll(getStderr, { timeout: 20000, interval: 250 }).toMatch(
       new RegExp(`Port ${occupiedPort} is already in use`, 'i')

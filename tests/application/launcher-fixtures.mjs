@@ -138,14 +138,37 @@ function closeOccupiedPortServer(blocker, sockets) {
   return new Promise((r) => blocker.close(r));
 }
 
+// Chrome can acknowledge `Browser.close` before it has finished starting up and then keep
+// running, so verify the DevTools port actually disappears and retry if it does not.
 async function closeChromeOnPort(port) {
-  try {
-    const res = await fetch(`http://127.0.0.1:${port}/json/version`);
-    const { webSocketDebuggerUrl } = await res.json();
-    if (webSocketDebuggerUrl) await sendBrowserClose(webSocketDebuggerUrl);
-  } catch {
-    // Port already closed
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const wsUrl = await browserWsUrl(port);
+    if (!wsUrl) return;
+    await sendBrowserClose(wsUrl);
+    if (await waitForDebugPortClosed(port, 1500)) return;
   }
+}
+
+async function browserWsUrl(port) {
+  try {
+    const res = await fetch(`http://127.0.0.1:${port}/json/version`, {
+      signal: AbortSignal.timeout(500),
+    });
+    if (!res.ok) return null;
+    const { webSocketDebuggerUrl } = await res.json();
+    return webSocketDebuggerUrl ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function waitForDebugPortClosed(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    await delay(150);
+    if (!(await browserWsUrl(port))) return true;
+  }
+  return false;
 }
 
 function sendBrowserClose(wsUrl) {
