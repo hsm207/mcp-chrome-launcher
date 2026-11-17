@@ -1,6 +1,6 @@
 {
   "name": "mcp-chrome-launcher",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "mcpName": "io.github.hsm207/mcp-chrome-launcher",
   "description": "Drop-in chrome-devtools-mcp proxy that shares one persistent, logged-in Chrome across parallel AI agents, IDEs, and Playwright.",
   "type": "module",
@@ -31,7 +31,8 @@
     "test": "vitest run",
     "test:app": "vitest run tests/application/application.test.mjs",
     "test:coverage": "vitest run --coverage",
-    "prepublishOnly": "npm run test:coverage"
+    "prepublishOnly": "npm run test:coverage",
+    "version": "node -e \"const fs=require('node:fs');const pkg=JSON.parse(fs.readFileSync('package.json','utf8'));const server=JSON.parse(fs.readFileSync('server.json','utf8'));server.version=pkg.version;server.packages[0].version=pkg.version;fs.writeFileSync('server.json',JSON.stringify(server,null,2)+'\\n');\" && git add server.json"
   },
   "author": "hsm207",
   "license": "MIT",
