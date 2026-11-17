@@ -5,7 +5,7 @@
   "type": "module",
   "main": "mcp-chrome-launcher.mjs",
   "bin": {
-    "mcp-chrome-launcher": "./mcp-chrome-launcher.mjs"
+    "mcp-chrome-launcher": "mcp-chrome-launcher.mjs"
   },
   "files": [
     "mcp-chrome-launcher.mjs",
