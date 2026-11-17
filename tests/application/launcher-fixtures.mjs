@@ -1,6 +1,6 @@
 import { test as base } from 'vitest';
 import { execa } from 'execa';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -8,6 +8,15 @@ import { setTimeout as delay } from 'node:timers/promises';
 import kill from 'tree-kill-promise';
 
 export const CLI_PATH = path.resolve('mcp-chrome-launcher.mjs');
+
+/**
+ * The launcher spawns `npx chrome-devtools-mcp@latest` as its MCP child. On CI that
+ * install is slow, collides in npx's shared cache (`ENOTEMPTY` on reruns), and a child
+ * that never exits leaves the launcher — and its V8 coverage flush — hanging. These
+ * tests only exercise the launcher, so PATH points at a stub that idles until stdin
+ * closes and then exits.
+ */
+const NPX_STUB_DIR = createNpxStub();
 
 /**
  * Extended Vitest `test` with isolated `tempDir`, `launcher`, and `occupiedPort` fixtures.
@@ -30,6 +39,25 @@ export const test = base.extend({
   },
 });
 
+function createNpxStub() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-npx-stub-'));
+  const stub = path.join(dir, 'mcpserver.mjs');
+  writeFileSync(stub, "process.stdin.resume();\nprocess.stdin.on('end', () => process.exit(0));\n");
+  const posixShim = path.join(dir, 'npx');
+  writeFileSync(posixShim, `#!/bin/sh\nexec "${process.execPath}" "${stub}"\n`);
+  chmodSync(posixShim, 0o755);
+  writeFileSync(path.join(dir, 'npx.cmd'), `@"${process.execPath}" "${stub}" %*\r\n`);
+  process.once('exit', () => rmSync(dir, { recursive: true, force: true }));
+  return dir;
+}
+
+function withStubNpx(env = process.env) {
+  const key = Object.keys(env).find((name) => name.toUpperCase() === 'PATH') ?? 'PATH';
+  const current = env[key];
+  const prefix = current ? `${NPX_STUB_DIR}${path.delimiter}${current}` : NPX_STUB_DIR;
+  return { ...env, [key]: prefix };
+}
+
 function cleanupTempDir(dir) {
   try {
     rmSync(dir, { recursive: true, force: true });
@@ -49,7 +77,7 @@ function createLauncherTracker(tempDir) {
       const child = execa(
         process.execPath,
         [CLI_PATH, `--port=${port}`, `--userDataDir=${tempDir}`, ...extraArgs],
-        { reject: false, stdin: 'pipe', stdout: 'ignore', stderr: 'pipe' }
+        { reject: false, stdin: 'pipe', stdout: 'ignore', stderr: 'pipe', env: withStubNpx() }
       );
       let stderr = '';
       child.stderr?.on('data', (chunk) => { stderr += chunk.toString('utf8'); });
