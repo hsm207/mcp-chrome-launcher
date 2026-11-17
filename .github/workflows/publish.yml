@@ -12,20 +12,20 @@ jobs:
   publish:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
-          node-version: '22'
+          node-version: '26'
           registry-url: 'https://registry.npmjs.org'
 
-      # Node 22 ships npm 10.x; OIDC trusted publishing needs npm >= 11.5.1.
+      # OIDC trusted publishing needs npm >= 11.5.1.
       - name: Upgrade npm for OIDC trusted publishing
         run: npm install -g npm@latest
 
-      # setup-node writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` and, on v4,
-      # exports a dummy NODE_AUTH_TOKEN. Either one makes npm skip the OIDC exchange,
-      # so strip the token line here and unset the variable at publish time.
+      # setup-node writes `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}` into .npmrc for
+      # `registry-url`, and an auth token of any kind makes npm skip the OIDC exchange.
+      # Strip the token line here and unset the variables at publish time.
       - name: Remove placeholder auth token from .npmrc
         run: |
           npmrc="${NPM_CONFIG_USERCONFIG:-$HOME/.npmrc}"
@@ -37,7 +37,7 @@ jobs:
       - run: npm ci
 
       - id: setup-chrome
-        uses: browser-actions/setup-chrome@v1
+        uses: browser-actions/setup-chrome@v2
 
       # Chrome-backed tests must pass (100% coverage) before anything is published.
       - name: Run tests
