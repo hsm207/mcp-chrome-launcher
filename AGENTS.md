@@ -35,3 +35,6 @@
 - `prepublishOnly` re-runs `test:coverage` inside `npm publish`, so that step is also wrapped in `xvfb-run`; keep it that way or the Chrome-backed application tests fail for lack of a display.
 - Trusted Publishing is bound to the workflow filename `publish.yml` — renaming it breaks publishing until npmjs.com is updated.
 - `server.json` (MCP Registry metadata) pins the same version, and its `name` must equal `mcpName` in `package.json`; bump both fields with every release or the registry rejects the package.
+
+## Git Workflow
+- Land every change through a pull request and merge it with a real merge commit: `gh pr merge --merge --delete-branch`. Never squash-merge or rebase-merge.
