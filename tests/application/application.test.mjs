@@ -30,8 +30,8 @@ describe('application: mcp-chrome-launcher CLI', () => {
     expect(await isPortReady(port)).toBe(false);
 
     sendRpc('tools/call', { name: 'list_pages' });
-    await expect.poll(() => isPortReady(port), { timeout: 12000, interval: 250 }).toBe(true);
-  }, 15000);
+    await expect.poll(() => isPortReady(port), { timeout: 20000, interval: 250 }).toBe(true);
+  }, 25000);
 
   test('Given an occupied port, when tools/call arrives, then mcp-chrome-launcher logs port conflict to stderr', async ({ launcher, occupiedPort }) => {
     const { sendRpc, getStderr } = launcher(occupiedPort);

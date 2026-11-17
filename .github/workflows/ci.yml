@@ -21,6 +21,8 @@ jobs:
           cache: 'npm'
       - run: npm ci
       - if: runner.os == 'Linux'
-        run: xvfb-run -a npm run test:coverage
+        run: |
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 || true
+          xvfb-run -a npm run test:coverage
       - if: runner.os != 'Linux'
         run: npm run test:coverage
