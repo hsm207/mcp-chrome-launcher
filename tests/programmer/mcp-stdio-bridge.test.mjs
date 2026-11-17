@@ -72,24 +72,26 @@ describe('mcp-stdio-bridge', () => {
     ).rejects.toThrow(/ENOENT/);
   });
 
-  test('Given a real DevTools server on port, when launchAndRun runs, then it spawns MCP with --browserUrl and cleans up', async () => {
+  test('Given a real DevTools server on port, when launchAndRun receives tools/call, then it skips Chrome spawn and forwards chunk', async () => {
     const srv = await startRealDevToolsServer();
     onTestFinished(() => srv.close());
     const stdin = new PassThrough();
     const child = createFakeChild();
-    let capturedArgs = null;
+    let chromeSpawned = false;
+    let forwarded = '';
+    child.stdin.on('data', (c) => { forwarded += c.toString('utf8'); });
 
     const runPromise = launchAndRun(['--allowUnrestrictedPaths'], {
       port: srv.port,
       stdin,
-      spawnMcp: (_cmd, args) => {
-        capturedArgs = args;
-        return child;
-      },
+      spawnChrome: () => { chromeSpawned = true; return { unref: () => {} }; },
+      spawnMcp: () => child,
     });
+    stdin.write('{"method":"tools/call"}\n');
+    await expect.poll(() => forwarded).toMatch(/tools\/call/);
     child.emit('exit', 0);
     expect(await runPromise).toBe(0);
-    expect(capturedArgs).toContain(`--browserUrl=http://127.0.0.1:${srv.port}`);
+    expect(chromeSpawned).toBe(false);
   });
 
   test('Given child.stdin is destroyed, when stdin emits data and end, then bridgeStdio skips write and end cleanly', async () => {
@@ -139,14 +141,16 @@ describe('mcp-stdio-bridge', () => {
     expect(cleaned).toBe(true);
   });
 
-  test('Given a real child process, when wireLifecycle detaches, then listener count returns to baseline', () => {
-    const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 5000)']);
-    const before = process.listenerCount('SIGTERM');
-    const detach = wireLifecycle(child);
-    expect(process.listenerCount('SIGTERM')).toBe(before + 1);
+  test('Given fakeProc, when wireLifecycle receives SIGINT and SIGTERM, then it forwards both and stops after detach', () => {
+    const fakeProc = new EventEmitter();
+    const killed = [];
+    const detach = wireLifecycle({ kill: (sig) => killed.push(sig) }, fakeProc);
+    fakeProc.emit('SIGINT');
+    fakeProc.emit('SIGTERM');
     detach();
-    expect(process.listenerCount('SIGTERM')).toBe(before);
-    child.kill();
+    fakeProc.emit('SIGINT');
+    fakeProc.emit('SIGTERM');
+    expect(killed).toEqual(['SIGINT', 'SIGTERM']);
   });
 
   test('Given tools/call JSON-RPC chunk, when isToolCallMessage runs, then it returns true', () => {
