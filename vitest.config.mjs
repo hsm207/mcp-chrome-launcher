@@ -10,6 +10,12 @@ export default defineConfig({
       provider: 'v8',
       include: ['mcp-chrome-launcher.mjs', 'src/**/*.mjs'],
       autoAttachSubprocess: true,
+      thresholds: {
+        lines: 100,
+        statements: 100,
+        functions: 100,
+        branches: 100,
+      },
     },
   },
 });
