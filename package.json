@@ -1,6 +1,6 @@
 {
   "name": "mcp-chrome-launcher",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Drop-in chrome-devtools-mcp proxy that shares one persistent, logged-in Chrome across parallel AI agents, IDEs, and Playwright.",
   "type": "module",
   "main": "mcp-chrome-launcher.mjs",
