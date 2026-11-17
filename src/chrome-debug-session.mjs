@@ -90,10 +90,6 @@ export function isPortOccupied(port) {
       resolve(true);
     });
     socket.once('error', () => resolve(false));
-    socket.setTimeout(300, () => {
-      socket.destroy();
-      resolve(false);
-    });
   });
 }
 
