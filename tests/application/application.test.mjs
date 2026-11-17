@@ -3,22 +3,25 @@ import { execa } from 'execa';
 import { isPortReady } from '../../mcp-chrome-launcher.mjs';
 import { CLI_PATH, test } from './launcher-fixtures.mjs';
 
+const EXIT_SUCCESS = 0;
+const EXIT_FAILURE = 1;
+
 describe('application: mcp-chrome-launcher CLI', () => {
   test('Given --version, when mcp-chrome-launcher runs, then it prints package version', async () => {
     const { exitCode, stdout } = await execa(process.execPath, [CLI_PATH, '--version'], { reject: false });
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(EXIT_SUCCESS);
     expect(stdout.trim()).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   test('Given --help, when mcp-chrome-launcher runs, then it prints usage options', async () => {
     const { exitCode, stdout } = await execa(process.execPath, [CLI_PATH, '--help'], { reject: false });
-    expect(exitCode).toBe(0);
+    expect(exitCode).toBe(EXIT_SUCCESS);
     expect(stdout).toMatch(/Usage: mcp-chrome-launcher/);
   });
 
   test('Given invalid --port, when mcp-chrome-launcher runs, then it exits 1 with an error message', async () => {
     const { exitCode, stderr } = await execa(process.execPath, [CLI_PATH, '--port=abc'], { reject: false });
-    expect(exitCode).toBe(1);
+    expect(exitCode).toBe(EXIT_FAILURE);
     expect(stderr).toMatch(/\[mcp-chrome-launcher\] Invalid --port/i);
   });
 
