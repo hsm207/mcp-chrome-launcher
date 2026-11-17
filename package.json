@@ -1,11 +1,52 @@
 {
   "name": "mcp-chrome-launcher",
   "version": "0.1.0",
-  "description": "Lazy-launching CDP wrapper for chrome-devtools-mcp that keeps Chrome open on a shared debugging port.",
+  "description": "Drop-in chrome-devtools-mcp proxy that shares one persistent, logged-in Chrome across parallel AI agents, IDEs, and Playwright.",
   "type": "module",
   "main": "mcp-chrome-launcher.mjs",
-  "scripts": {
-    "test": "node --test"
+  "bin": {
+    "mcp-chrome-launcher": "mcp-chrome-launcher.mjs"
   },
-  "license": "MIT"
+  "files": [
+    "mcp-chrome-launcher.mjs",
+    "src/",
+    "README.md"
+  ],
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "chrome-devtools-mcp",
+    "chrome",
+    "cdp",
+    "playwright",
+    "puppeteer",
+    "claude-code",
+    "cursor"
+  ],
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:app": "vitest run tests/application/application.test.mjs",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "npm run test:coverage"
+  },
+  "author": "hsm207",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/hsm207/mcp-chrome-launcher.git"
+  },
+  "homepage": "https://github.com/hsm207/mcp-chrome-launcher#readme",
+  "bugs": {
+    "url": "https://github.com/hsm207/mcp-chrome-launcher/issues"
+  },
+  "devDependencies": {
+    "@vitest/coverage-v8": "^5.1.0",
+    "execa": "^10.2.1",
+    "tree-kill-promise": "^5.0.0",
+    "vite": "^8.3.8",
+    "vitest": "^5.1.0"
+  }
 }
