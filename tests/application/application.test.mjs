@@ -16,6 +16,12 @@ describe('application: mcp-chrome-launcher CLI', () => {
     expect(stdout).toMatch(/Usage: mcp-chrome-launcher/);
   });
 
+  test('Given invalid --port, when mcp-chrome-launcher runs, then it exits 1 with an error message', async () => {
+    const { exitCode, stderr } = await execa(process.execPath, [CLI_PATH, '--port=abc'], { reject: false });
+    expect(exitCode).toBe(1);
+    expect(stderr).toMatch(/\[mcp-chrome-launcher\] Invalid --port/i);
+  });
+
   test('Given mcp-chrome-launcher over stdio, when tools/call arrives, then it lazy-launches real Chrome on the configured port', async ({ launcher }) => {
     const port = 19226;
     const { sendRpc } = launcher(port);

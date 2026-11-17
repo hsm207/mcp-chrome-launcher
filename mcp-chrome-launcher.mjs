@@ -21,21 +21,24 @@ export {
   wireLifecycle,
 } from './src/mcp-stdio-bridge.mjs';
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
-  const cliArgs = process.argv.slice(2);
+async function main(cliArgs) {
   const { help, version } = partitionArgs(cliArgs);
 
   if (help) {
     console.log(HELP_TEXT);
-    process.exit(0);
+    return 0;
   }
   if (version) {
     const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
     console.log(pkg.version);
-    process.exit(0);
+    return 0;
   }
 
-  launchAndRun(cliArgs)
+  return launchAndRun(cliArgs);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+  main(process.argv.slice(2))
     .then((code) => process.exit(code))
     .catch((err) => {
       console.error(`[mcp-chrome-launcher] ${err.message}`);
