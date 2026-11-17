@@ -1,0 +1,21 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.hsm207/mcp-chrome-launcher",
+  "title": "MCP Chrome Launcher",
+  "description": "Drop-in chrome-devtools-mcp proxy sharing one persistent logged-in Chrome.",
+  "repository": {
+    "url": "https://github.com/hsm207/mcp-chrome-launcher",
+    "source": "github"
+  },
+  "version": "0.1.2",
+  "packages": [
+    {
+      "registryType": "npm",
+      "identifier": "mcp-chrome-launcher",
+      "version": "0.1.2",
+      "transport": {
+        "type": "stdio"
+      }
+    }
+  ]
+}
