@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import kill from 'tree-kill-promise';
 
 export const CLI_PATH = path.resolve('mcp-chrome-launcher.mjs');
@@ -71,6 +72,8 @@ async function cleanupLauncherResources(ports, children) {
 }
 
 async function terminateChild(child) {
+  child.stdin?.end();
+  await Promise.race([child.catch(() => {}), delay(1000)]);
   child.stdin?.destroy();
   child.stderr?.destroy();
   if (child.pid && child.exitCode === null) {
