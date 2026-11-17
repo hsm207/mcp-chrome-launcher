@@ -19,13 +19,21 @@ export const CLI_PATH = path.resolve('mcp-chrome-launcher.mjs');
 const NPX_STUB_DIR = createNpxStub();
 
 /**
- * Extended Vitest `test` with isolated `tempDir`, `launcher`, and `occupiedPort` fixtures.
+ * Extended Vitest `test` with isolated `tempDir`, `freePort`, `launcher`, and
+ * `occupiedPort` fixtures.
  */
 export const test = base.extend({
   tempDir: async ({}, use) => {
     const dir = mkdtempSync(path.join(os.tmpdir(), 'mcp-chrome-app-'));
     await use(dir);
     cleanupTempDir(dir);
+  },
+  freePort: async ({}, use) => {
+    const probe = net.createServer();
+    await new Promise((r) => probe.listen(0, '127.0.0.1', r));
+    const { port } = probe.address();
+    await new Promise((r) => probe.close(r));
+    await use(port);
   },
   launcher: async ({ tempDir }, use) => {
     const tracker = createLauncherTracker(tempDir);
@@ -90,12 +98,14 @@ function createLauncherTracker(tempDir) {
   };
 }
 
+// Children first: a still-running launcher could spawn a fresh detached Chrome after
+// the port cleanup already ran, leaving that browser orphaned on the debug port.
 async function cleanupLauncherResources(ports, children) {
-  for (const port of ports) {
-    await closeChromeOnPort(port);
-  }
   for (const child of children) {
     await terminateChild(child);
+  }
+  for (const port of ports) {
+    await closeChromeOnPort(port);
   }
 }
 

@@ -5,8 +5,8 @@
 - **Tarball hygiene**: Keep `package.json` `"files"` restricted to `["mcp-chrome-launcher.mjs", "src/", "README.md"]` so `AGENTS.md`, `tests/`, and `vitest.config.mjs` are excluded from npm tarballs.
 
 ## Process & Chrome Teardown Order (`tests/application/`)
-1. Close Chrome cleanly via CDP `Browser.close` over `WebSocket` on the debug port.
-2. Call `child.stdin?.end()` and `Promise.race` against a bounded timeout (so V8 flushes subprocess coverage before exit), then `.destroy()` `stdin`/`stderr` streams.
+1. Terminate the launcher child first: call `child.stdin?.end()` and `Promise.race` against a bounded timeout (so V8 flushes subprocess coverage before exit), then `.destroy()` `stdin`/`stderr` streams. A still-running launcher could otherwise spawn a fresh detached Chrome after port cleanup has run.
+2. Only then close Chrome cleanly via CDP `Browser.close` over `WebSocket` on the debug port, once no launcher process can restart it.
 3. Only if `child.pid && child.exitCode === null`, fall back to `tree-kill-promise` (`kill(child.pid, 'SIGKILL')`).
 4. Always `clearTimeout(timer)` on settlement in `Promise.race` / WebSocket helpers.
 

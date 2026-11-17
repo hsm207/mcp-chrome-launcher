@@ -22,8 +22,8 @@ describe('application: mcp-chrome-launcher CLI', () => {
     expect(stderr).toMatch(/\[mcp-chrome-launcher\] Invalid --port/i);
   });
 
-  test('Given mcp-chrome-launcher over stdio, when tools/call arrives, then it lazy-launches real Chrome on the configured port', async ({ launcher }) => {
-    const port = 19226;
+  test('Given mcp-chrome-launcher over stdio, when tools/call arrives, then it lazy-launches real Chrome on the configured port', async ({ launcher, freePort }) => {
+    const port = freePort;
     const { sendRpc } = launcher(port);
 
     sendRpc('initialize');
