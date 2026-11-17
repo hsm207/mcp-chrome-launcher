@@ -9,38 +9,87 @@ import {
 } from './chrome-debug-session.mjs';
 
 /**
- * Spawns detached Chrome on the debug port, waits, then runs chrome-devtools-mcp attached to it.
+ * Spawns `chrome-devtools-mcp` and lazily launches detached Chrome on the first `tools/call`.
  * @param {string[]} [extraArgs]
  * @param {object} [deps]
  */
 export async function launchAndRun(extraArgs = [], deps = {}) {
   const { port, mcpArgs, ensureChrome } = resolveLaunchConfig(extraArgs, deps);
-
-  if (deps.runMcp) {
-    await ensureChrome();
-    return deps.runMcp(mcpArgs, { browserUrl: `http://127.0.0.1:${port}` });
-  }
-
+  const spawnMcp = deps.spawnMcp ?? spawn;
   const { command, args, options } = buildMcpSpawnSpec(mcpArgs, {
     browserUrl: `http://127.0.0.1:${port}`,
   });
-  const child = spawn(command, args, { ...options, stdio: ['pipe', 'inherit', 'inherit'] });
-  const detach = wireLifecycle(child);
-  bridgeStdio(child, ensureChrome);
-  return awaitChildExit(child, detach);
+
+  const child = spawnMcp(command, args, { ...options, stdio: ['pipe', 'inherit', 'inherit'] });
+  const detachSignals = wireLifecycle(child);
+  const detachStdin = bridgeStdio(child, ensureChrome, {
+    stdin: deps.stdin,
+    logError: deps.logError,
+  });
+
+  return awaitChildExit(child, () => {
+    detachStdin();
+    detachSignals();
+  });
 }
 
 /**
  * Spawns a child process with inherited stdio and resolves with its exit code.
  * @param {string[]} [extraArgs]
  * @param {(extraArgs: string[]) => object} [specBuilder]
+ * @param {typeof spawn} [spawnMcp]
  * @returns {Promise<number>}
  */
-export function runPassthrough(extraArgs = [], specBuilder = buildMcpSpawnSpec) {
+export function runPassthrough(extraArgs = [], specBuilder = buildMcpSpawnSpec, spawnMcp = spawn) {
   const { command, args, options } = specBuilder(extraArgs);
-  const child = spawn(command, args, options);
+  const child = spawnMcp(command, args, options);
   const detach = wireLifecycle(child);
   return awaitChildExit(child, detach);
+}
+
+/**
+ * Bridges `stdin` to `child.stdin`, lazily invoking `ensureChrome` on `tools/call`.
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {() => Promise<void>} ensureChrome
+ * @param {{ stdin?: NodeJS.ReadableStream, logError?: (msg: string) => void }} [io]
+ * @returns {() => void}
+ */
+export function bridgeStdio(
+  child,
+  ensureChrome,
+  { stdin = process.stdin, logError = console.error } = {}
+) {
+  const runEnsure = createSerializedEnsure(ensureChrome);
+  const onData = (chunk) => forwardStdinChunk(chunk, child, runEnsure, { stdin, logError });
+  const onEnd = () => {
+    if (!child.stdin.destroyed) child.stdin.end();
+  };
+
+  stdin.on('data', onData);
+  stdin.on('end', onEnd);
+  return () => {
+    stdin.off('data', onData);
+    stdin.off('end', onEnd);
+  };
+}
+
+/**
+ * Awaits child process exit or error, invoking `cleanup` before settling.
+ * @param {import('node:child_process').ChildProcess} child
+ * @param {() => void} cleanup
+ * @returns {Promise<number>}
+ */
+export function awaitChildExit(child, cleanup) {
+  return new Promise((resolve, reject) => {
+    child.on('error', (err) => {
+      cleanup();
+      reject(err);
+    });
+    child.on('exit', (code) => {
+      cleanup();
+      resolve(code ?? 1);
+    });
+  });
 }
 
 /**
@@ -130,15 +179,6 @@ function createEnsureChrome({
   };
 }
 
-function bridgeStdio(child, ensureChrome) {
-  const runEnsure = createSerializedEnsure(ensureChrome);
-
-  process.stdin.on('data', (chunk) => forwardStdinChunk(chunk, child, runEnsure));
-  process.stdin.on('end', () => {
-    if (!child.stdin.destroyed) child.stdin.end();
-  });
-}
-
 function createSerializedEnsure(ensureChrome) {
   let inFlight = null;
   return () => {
@@ -149,31 +189,18 @@ function createSerializedEnsure(ensureChrome) {
   };
 }
 
-async function forwardStdinChunk(chunk, child, runEnsure) {
+async function forwardStdinChunk(chunk, child, runEnsure, { stdin, logError }) {
   if (isToolCallMessage(chunk.toString('utf8'))) {
-    process.stdin.pause();
+    stdin.pause();
     try {
       await runEnsure();
     } catch (err) {
-      console.error(`[mcp-chrome-launcher] ${err.message}`);
+      logError(`[mcp-chrome-launcher] ${err.message}`);
     } finally {
-      process.stdin.resume();
+      stdin.resume();
     }
   }
   if (!child.stdin.destroyed) {
     child.stdin.write(chunk);
   }
-}
-
-function awaitChildExit(child, detach) {
-  return new Promise((resolve, reject) => {
-    child.on('error', (err) => {
-      detach();
-      reject(err);
-    });
-    child.on('exit', (code, signal) => {
-      detach();
-      resolve(code ?? (signal ? 1 : 0));
-    });
-  });
 }

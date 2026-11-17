@@ -1,13 +1,17 @@
 import { describe, expect, onTestFinished, test } from 'vitest';
 import { spawn } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import http from 'node:http';
+import { PassThrough } from 'node:stream';
 import {
+  awaitChildExit,
+  bridgeStdio,
   buildMcpSpawnSpec,
   isToolCallMessage,
   launchAndRun,
   runPassthrough,
   wireLifecycle,
-} from '../../mcp-chrome-launcher.mjs';
+} from '../../src/mcp-stdio-bridge.mjs';
 
 /**
  * Starts a real local HTTP server that responds 200 OK on `/json/version`.
@@ -24,6 +28,13 @@ function startRealDevToolsServer() {
       resolve({ port, close: () => new Promise((r) => server.close(r)) });
     });
   });
+}
+
+function createFakeChild() {
+  const child = new EventEmitter();
+  child.stdin = new PassThrough();
+  child.kill = () => {};
+  return child;
 }
 
 describe('mcp-stdio-bridge', () => {
@@ -61,18 +72,71 @@ describe('mcp-stdio-bridge', () => {
     ).rejects.toThrow(/ENOENT/);
   });
 
-  test('Given a real DevTools server on port, when launchAndRun runs, then it passes browserUrl to runMcp', async () => {
+  test('Given a real DevTools server on port, when launchAndRun runs, then it spawns MCP with --browserUrl and cleans up', async () => {
     const srv = await startRealDevToolsServer();
     onTestFinished(() => srv.close());
-    const code = await launchAndRun(['--allowUnrestrictedPaths'], {
+    const stdin = new PassThrough();
+    const child = createFakeChild();
+    let capturedArgs = null;
+
+    const runPromise = launchAndRun(['--allowUnrestrictedPaths'], {
       port: srv.port,
-      runMcp: async (args, opts) => {
-        expect(args).toEqual(['--allowUnrestrictedPaths']);
-        expect(opts).toEqual({ browserUrl: `http://127.0.0.1:${srv.port}` });
-        return 0;
+      stdin,
+      spawnMcp: (_cmd, args) => {
+        capturedArgs = args;
+        return child;
       },
     });
-    expect(code).toBe(0);
+    child.emit('exit', 0);
+    expect(await runPromise).toBe(0);
+    expect(capturedArgs).toContain(`--browserUrl=http://127.0.0.1:${srv.port}`);
+  });
+
+  test('Given child.stdin is destroyed, when stdin emits data and end, then bridgeStdio skips write and end cleanly', async () => {
+    const stdin = new PassThrough();
+    const child = createFakeChild();
+    child.stdin.destroy();
+    const detach = bridgeStdio(child, async () => {}, { stdin, logError: () => {} });
+
+    stdin.emit('data', Buffer.from('{"method":"initialize"}\n'));
+    stdin.emit('data', Buffer.from('{"method":"tools/call"}\n'));
+    stdin.emit('end');
+    await new Promise((r) => setImmediate(r));
+    detach();
+    expect(child.stdin.destroyed).toBe(true);
+  });
+
+  test('Given ensureChrome throws, when bridgeStdio sees tools/call, then it logs the error', async () => {
+    const stdin = new PassThrough();
+    const child = createFakeChild();
+    const errors = [];
+    const detach = bridgeStdio(child, async () => { throw new Error('boom'); }, {
+      stdin,
+      logError: (msg) => errors.push(msg),
+    });
+
+    stdin.emit('data', Buffer.from('{"method":"tools/call"}\n'));
+    await expect.poll(() => errors.length).toBe(1);
+    expect(errors[0]).toMatch(/boom/);
+    detach();
+  });
+
+  test('Given child exits by signal, when awaitChildExit runs, then it resolves to 1 after cleanup', async () => {
+    const child = createFakeChild();
+    let cleaned = false;
+    const exitPromise = awaitChildExit(child, () => { cleaned = true; });
+    child.emit('exit', null, 'SIGTERM');
+    expect(await exitPromise).toBe(1);
+    expect(cleaned).toBe(true);
+  });
+
+  test('Given child emits error, when awaitChildExit runs, then it rejects after cleanup', async () => {
+    const child = createFakeChild();
+    let cleaned = false;
+    const exitPromise = awaitChildExit(child, () => { cleaned = true; });
+    child.emit('error', new Error('spawn failed'));
+    await expect(exitPromise).rejects.toThrow(/spawn failed/);
+    expect(cleaned).toBe(true);
   });
 
   test('Given a real child process, when wireLifecycle detaches, then listener count returns to baseline', () => {
