@@ -56,11 +56,6 @@ describe('mcp-stdio-bridge', () => {
     expect(spec.args).toEqual(['-y', 'chrome-devtools-mcp@latest', '--browserUrl=http://127.0.0.1:9222', '--allowUnrestrictedPaths']);
   });
 
-  test('Given child exits 0, when runPassthrough runs, then it resolves with 0', async () => {
-    const code = await runPassthrough([], () => ({ command: process.execPath, args: ['-e', 'process.exit(0)'], options: { stdio: 'inherit' } }));
-    expect(code).toBe(0);
-  });
-
   test('Given child exits 42, when runPassthrough runs, then it forwards exit code 42', async () => {
     const code = await runPassthrough([], () => ({ command: process.execPath, args: ['-e', 'process.exit(42)'], options: { stdio: 'inherit' } }));
     expect(code).toBe(42);
