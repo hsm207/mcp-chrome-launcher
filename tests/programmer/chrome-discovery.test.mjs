@@ -4,6 +4,16 @@ import path from 'node:path';
 import { findChromePath } from '../../mcp-chrome-launcher.mjs';
 
 describe('chrome-discovery', () => {
+  test('Given win32, when findChromePath runs, then it discovers Chrome in Program Files', () => {
+    const expected = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+    const found = findChromePath({
+      platform: 'win32',
+      env: { PROGRAMFILES: 'C:\\Program Files' },
+      existsSync: (p) => p === expected,
+    });
+    expect(found).toBe(expected);
+  });
+
   test('Given darwin with HOME, when findChromePath runs, then it discovers user Applications Chrome', () => {
     const expected = '/Users/test/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
     const found = findChromePath({
