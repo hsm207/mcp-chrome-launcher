@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { readFileSync } from 'node:fs';
 import { pathToFileURL } from 'node:url';
 import { HELP_TEXT, partitionArgs } from './src/cli-options.mjs';

@@ -4,6 +4,9 @@
   "description": "Lazy-launching CDP wrapper for chrome-devtools-mcp that keeps Chrome open on a shared debugging port.",
   "type": "module",
   "main": "mcp-chrome-launcher.mjs",
+  "bin": {
+    "mcp-chrome-launcher": "./mcp-chrome-launcher.mjs"
+  },
   "files": [
     "mcp-chrome-launcher.mjs",
     "src/",
