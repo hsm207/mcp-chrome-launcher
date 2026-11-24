@@ -1,6 +1,22 @@
 # `mcp-chrome-launcher`
 
-[![hsm207/mcp-chrome-launcher MCP server](https://glama.ai/mcp/servers/hsm207/mcp-chrome-launcher/badges/score.svg)](https://glama.ai/mcp/servers/hsm207/mcp-chrome-launcher)
+[![npm version](https://img.shields.io/npm/v/mcp-chrome-launcher)](https://www.npmjs.com/package/mcp-chrome-launcher)
+[![CI](https://github.com/hsm207/mcp-chrome-launcher/actions/workflows/ci.yml/badge.svg)](https://github.com/hsm207/mcp-chrome-launcher/actions/workflows/ci.yml)
+[![node](https://img.shields.io/node/v/mcp-chrome-launcher)](https://nodejs.org)
+[![license](https://img.shields.io/npm/l/mcp-chrome-launcher)](LICENSE)
+
+<p>
+  <a href="https://glama.ai/mcp/servers/hsm207/mcp-chrome-launcher">
+    <img height="150" src="https://glama.ai/mcp/servers/hsm207/mcp-chrome-launcher/badges/score.svg" alt="hsm207/mcp-chrome-launcher MCP server" />
+  </a>
+  <a href="https://mcprush.com/to/mcp-chrome-launcher?ref=badge">
+    <picture>
+      <source media="(prefers-color-scheme: dark)" srcset="https://mcprush.com/badge/mcp-chrome-launcher/card.svg" />
+      <source media="(prefers-color-scheme: light)" srcset="https://mcprush.com/badge/mcp-chrome-launcher/card.svg?theme=light" />
+      <img height="150" src="https://mcprush.com/badge/mcp-chrome-launcher/card.svg?theme=light" alt="MCP Chrome Launcher MCP server" />
+    </picture>
+  </a>
+</p>
 
 **One persistent, logged-in Chrome shared across all your AI agents, IDE windows, and Playwright/Puppeteer scripts—launched lazily on demand.**
 
