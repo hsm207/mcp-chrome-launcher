@@ -1,5 +1,7 @@
 # `mcp-chrome-launcher`
 
+[![hsm207/mcp-chrome-launcher MCP server](https://glama.ai/mcp/servers/hsm207/mcp-chrome-launcher/badges/score.svg)](https://glama.ai/mcp/servers/hsm207/mcp-chrome-launcher)
+
 **One persistent, logged-in Chrome shared across all your AI agents, IDE windows, and Playwright/Puppeteer scripts—launched lazily on demand.**
 
 Zero runtime dependencies • Cross-platform (Windows, macOS, Linux) • 100% Test Coverage • Drop-in replacement for `chrome-devtools-mcp`
